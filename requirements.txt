@@ -1,5 +1,5 @@
-opencv-python
-mediapipe
+opencv-python==4.11.0.86
+mediapipe==0.10.21
 comtypes
-numpy
+numpy<2
 pycaw

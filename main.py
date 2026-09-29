@@ -13,8 +13,7 @@ mp_hands = mp.solutions.hands
 
 # Volume Control Library Usage 
 devices = AudioUtilities.GetSpeakers()
-interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-volume = cast(interface, POINTER(IAudioEndpointVolume))
+volume = devices.EndpointVolume
 volRange = volume.GetVolumeRange()
 minVol , maxVol , volBar, volPer= volRange[0] , volRange[1], 400, 0
 
