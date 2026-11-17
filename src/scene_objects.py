@@ -13,35 +13,12 @@ class Transform:
     scale: np.ndarray = field(default_factory=lambda: np.ones(3, dtype=float))
 
 
-@dataclass
-class RigidBody:
-    velocity: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
-    angular_velocity: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
-    mass: float = 1.0
-    restitution: float = 0.35
-    friction: float = 0.8
-    gravity_enabled: bool = True
-
-    @property
-    def inverse_mass(self) -> float:
-        return 0.0 if self.mass <= 0.0 else 1.0 / self.mass
-
-
 class SceneObject(ABC):
     def __init__(self, name: str, shape_type: ShapeType, transform: Transform | None = None):
         self.name = name
         self.shape_type = shape_type
         self.transform = transform or Transform()
         self.color = (180, 180, 180)
-        self.rigid_body = RigidBody()
-
-    def translate(self, axis: str, amount: float) -> None:
-        index = {"x": 0, "y": 1, "z": 2}[axis]
-        self.transform.position[index] += amount
-
-    def apply_scale(self, amount: float) -> None:
-        factor = max(0.1, float(amount))
-        self.transform.scale *= factor
 
     @abstractmethod
     def get_mesh(self) -> dict:

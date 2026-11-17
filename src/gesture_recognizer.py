@@ -94,17 +94,13 @@ class GestureRecognizer:
         elif forced_label:
             label, confidence = forced_label, 1.0
 
-        if forced_label:
-            label = forced_label
-        else:
+        if not forced_label:
             self.history.append(label)
             label = Counter(self.history).most_common(1)[0][0]
         gesture = LABEL_TO_GESTURE.get(label, GestureType.NONE)
-        delta = self._motion_delta(gesture, cursor)
         return GestureEvent(
             type=gesture,
             confidence=confidence,
-            delta=delta,
             cursor_pos=cursor,
             label=label,
         )
@@ -141,46 +137,6 @@ class GestureRecognizer:
 
         scores = {
             "none": 0.15,
-            "thumb_x": 0.0,
-            "index_y": 0.0,
-            "palm_z": 0.0,
-            "cursor": 0.0,
         }
-        if thumb and others_curled and (not index):
-            scores["thumb_x"] = 0.8
-        if index and others_curled and (not thumb) and (xy(8)[1] < wrist[1]) and not pointing_at_camera:
-            scores["index_y"] = 0.8
-        if index and middle and ring:
-            scores["palm_z"] = 0.85
-        if pointing_at_camera and others_curled:
-            scores["cursor"] = 0.85
-
         label = max(scores, key=scores.get)
         return label, scores[label]
-
-    def _motion_delta(self, gesture: GestureType, cursor) -> tuple[float, float, float]:
-        dx = dy = dz = 0.0
-        if cursor is None:
-            self.last_cursor = None
-            self.last_hand_size = None
-            return (0.0, 0.0, 0.0)
-
-        if self.last_cursor is not None:
-            dx = (cursor[0] - self.last_cursor[0]) * 0.004
-            dy = -(cursor[1] - self.last_cursor[1]) * 0.004
-        self.last_cursor = cursor
-
-        if self.last_landmarks is not None:
-            p0, p9 = self.last_landmarks[0], self.last_landmarks[9]
-            size = float(np.hypot(p0.x - p9.x, p0.y - p9.y))
-            if self.last_hand_size is not None:
-                dz = -(size - self.last_hand_size) * 8.0
-            self.last_hand_size = size
-
-        if gesture is GestureType.X_AXIS:
-            return (dx, 0.0, 0.0)
-        if gesture is GestureType.Y_AXIS:
-            return (0.0, dy, 0.0)
-        if gesture is GestureType.Z_AXIS:
-            return (0.0, 0.0, dz)
-        return (0.0, 0.0, 0.0)

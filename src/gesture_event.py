@@ -8,10 +8,6 @@ Vector3 = Tuple[float, float, float]
 
 class GestureType(str, Enum):
     CREATE_SHAPE = "CREATE_SHAPE"
-    CURSOR_SELECT = "CURSOR_SELECT"
-    X_AXIS = "X_AXIS"
-    Y_AXIS = "Y_AXIS"
-    Z_AXIS = "Z_AXIS"
     NONE = "NONE"
 
 
@@ -24,10 +20,6 @@ class ShapeType(str, Enum):
 
 # Groupmate labels from data_collection/collect_gestures.py
 LABEL_TO_GESTURE = {
-    "thumb_x": GestureType.X_AXIS,
-    "index_y": GestureType.Y_AXIS,
-    "palm_z": GestureType.Z_AXIS,
-    "cursor": GestureType.CURSOR_SELECT,
     "none": GestureType.NONE,
 }
 

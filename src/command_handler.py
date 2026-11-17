@@ -11,7 +11,7 @@ class CommandHandler:
     def set_next_shape(self, shape_type: ShapeType) -> None:
         self.next_shape = shape_type
 
-    def handle(self, event: GestureEvent, spawn_position, projected_centers) -> None:
+    def handle(self, event: GestureEvent, spawn_position=None, projected_centers=None) -> None:
         if event.type is GestureType.NONE:
             return
 
@@ -20,14 +20,3 @@ class CommandHandler:
             obj = ShapeFactory.create(shape, position=spawn_position)
             self.scene.add(obj)
             return
-
-        if event.type is GestureType.CURSOR_SELECT:
-            self.scene.select_at(event.cursor_pos, projected_centers)
-            return
-
-        if event.type is GestureType.X_AXIS:
-            self.scene.move_selected("x", event.delta[0])
-        elif event.type is GestureType.Y_AXIS:
-            self.scene.move_selected("y", event.delta[1])
-        elif event.type is GestureType.Z_AXIS:
-            self.scene.move_selected("z", event.delta[2])

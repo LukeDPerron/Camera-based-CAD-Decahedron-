@@ -10,7 +10,6 @@ from pyglet.math import Mat4, Vec3
 from pyglet.window import key, mouse
 
 from .gesture_event import ShapeType
-from .physics import PhysicsWorld
 from .scene import Scene
 from .shape_factory import ShapeFactory
 from .scene_objects import Cube, Cylinder, Pyramid, Sphere
@@ -127,15 +126,13 @@ def _cylinder_vertices(scale, slices=16):
 
 
 class PygletSceneWindow(pyglet.window.Window):
-    def __init__(self, scene: Scene, physics: PhysicsWorld | None = None):
+    def __init__(self, scene: Scene):
         super().__init__(width=1280, height=720, caption="Decahedron 3D Scene", resizable=True)
         self.scene = scene
-        self.physics = physics or PhysicsWorld()
         self.camera_yaw = 45.0
         self.camera_pitch = 25.0
         self.camera_distance = 8.0
         self.camera_target = np.array([0.0, 0.0, 0.0], dtype=float)
-        self.paused = False
         self.lock = threading.RLock()
         vertex_shader = Shader(VERTEX_SHADER, "vertex")
         fragment_shader = Shader(FRAGMENT_SHADER, "fragment")
@@ -143,13 +140,6 @@ class PygletSceneWindow(pyglet.window.Window):
         self.shader_group = ShaderGroup(self.program)
 
         pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
-        pyglet.clock.schedule_interval(self._step, 1.0 / 60.0)
-
-    def _step(self, dt):
-        if not self.paused:
-            with self.lock:
-                self.physics.step(self.scene, dt)
-
     def _camera(self):
         yaw = math.radians(self.camera_yaw)
         pitch = math.radians(self.camera_pitch)
@@ -192,16 +182,12 @@ class PygletSceneWindow(pyglet.window.Window):
         batch = Batch()
         with self.lock:
             objects = list(self.scene.objects)
-            selected = self.scene.selected
 
         for obj in objects:
             vertices = self._vertices_for(obj)
             if len(vertices) == 0:
                 continue
-            if obj is selected:
-                color = (1.0, 0.82, 0.2)
-            else:
-                color = tuple(channel / 255.0 for channel in obj.color)
+            color = tuple(channel / 255.0 for channel in obj.color)
             vertex_count = len(vertices)
             colors = np.tile(np.asarray(color, dtype=np.float32), (vertex_count, 1)).reshape(-1)
             batch.add(
@@ -224,15 +210,6 @@ class PygletSceneWindow(pyglet.window.Window):
             self.scene.add(ShapeFactory.create(ShapeType.SPHERE))
         elif symbol == key._3:
             self.scene.add(ShapeFactory.create(ShapeType.PYRAMID))
-        elif symbol == key.G:
-            for obj in self.scene.objects:
-                obj.rigid_body.gravity_enabled = not obj.rigid_body.gravity_enabled
-        elif symbol == key.P:
-            self.paused = not self.paused
-        elif symbol == key.DELETE:
-            if self.scene.selected:
-                self.scene.objects.remove(self.scene.selected)
-                self.scene.selected = self.scene.objects[-1] if self.scene.objects else None
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         if buttons & mouse.LEFT:
@@ -243,8 +220,8 @@ class PygletSceneWindow(pyglet.window.Window):
         self.camera_distance = max(2.0, min(30.0, self.camera_distance - scroll_y))
 
 
-def run(scene: Scene | None = None, physics: PhysicsWorld | None = None) -> None:
-    PygletSceneWindow(scene or Scene(), physics)
+def run(scene: Scene | None = None) -> None:
+    PygletSceneWindow(scene or Scene())
     pyglet.app.run()
 
 
