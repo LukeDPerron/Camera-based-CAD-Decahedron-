@@ -1,6 +1,6 @@
 # Decahedron Shape and Gesture Logic
 
-This branch contains the non-UI logic for creating and editing 3D shapes.
+This branch combines the CustomTkinter UI with the non-UI logic for creating and editing 3D shapes.
 
 ## Backend
 
@@ -22,6 +22,16 @@ The existing gesture labels map to axis translation and cursor selection:
 | `none` | No action |
 
 Shape creation is available through a `CREATE_SHAPE` event. The UI can choose a shape type and provide its position; no create gesture is assumed.
+
+## UI
+
+The CustomTkinter UI is located in `ui/`. Run it with:
+
+```text
+python ui/app.py
+```
+
+The UI branch provides the camera canvas, tracking helpers, gesture dwell handling, and UI tests. The backend event contract remains independent of the UI implementation.
 
 ## Tests
 

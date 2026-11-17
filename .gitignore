@@ -223,3 +223,15 @@ models/
 .pptx_preview/
 model.glb
 model.gltf
+
+tmp/
+cdx.sh
+create_user.sh
+
+# ============================================================================
+# UI: Camera Canvas
+# ============================================================================
+/ui/.venv/
+/ui/models/
+/ui/__pycache__/
+/ui/.test-runtime/

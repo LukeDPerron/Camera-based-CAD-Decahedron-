@@ -1,3 +1,26 @@
-opencv-python
-mediapipe
-numpy
+# ============================================================================
+# UI: Camera Canvas
+# Python 3.10–3.14. Intel Macs must use Python 3.10–3.12.
+# ============================================================================
+
+# UI: shared dependencies and camera discovery
+customtkinter==5.2.2
+cv2-enumerate-cameras==1.4.0
+# Native macOS camera names and hot-plug discovery (pulled in by the enumerator).
+pyobjc-framework-AVFoundation==12.0; platform_system == "Darwin"
+
+# UI: Python 3.10–3.12 (includes Intel Mac support)
+mediapipe==0.10.18; python_version < "3.13"
+opencv-contrib-python==4.9.0.80; python_version < "3.13"
+numpy==1.26.4; python_version < "3.13"
+Pillow>=10.4,<12; python_version < "3.13"
+jax==0.4.35; python_version < "3.13"
+jaxlib==0.4.35; python_version < "3.13"
+scipy==1.14.1; python_version < "3.13"
+
+# UI: Python 3.13–3.14 (Apple Silicon and Windows x64; no Intel Mac wheels)
+mediapipe==0.10.35; python_version >= "3.13"
+opencv-contrib-python==4.10.0.84; python_version >= "3.13"
+numpy==2.2.6; python_version == "3.13"
+numpy==2.3.5; python_version >= "3.14"
+Pillow==12.0.0; python_version >= "3.13"
