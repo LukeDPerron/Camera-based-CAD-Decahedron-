@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+tmp/
+cdx.sh
+create_user.sh
+
+# ============================================================================
+# UI: Camera Canvas
+# ============================================================================
+/ui/.venv/
+/ui/models/
+/ui/__pycache__/
+/ui/.test-runtime/
