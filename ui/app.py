@@ -16,6 +16,13 @@ if (platform.system() == "Darwin" and platform.machine() == "x86_64"
         "Use Python 3.12, or native arm64 Python on an Apple Silicon Mac."
     )
 
+from pathlib import Path
+
+# `python ui/app.py` only puts ui/ on the path; the shared backend lives in ../src.
+_ROOT = str(Path(__file__).resolve().parent.parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import tkinter as tk
 from queue import Empty, SimpleQueue
 from threading import Thread
@@ -35,6 +42,9 @@ CANVAS = "#0B1016"
 TEXT = "#EDF4F7"
 MUTED = "#95A5B5"
 ACCENT = "#5FE6BE"
+# World units moved per full sweep of the fingertip across the camera frame.
+MOVE_SCALE_X = 8.0
+MOVE_SCALE_Y = 5.0
 
 
 class CameraCanvasApp(ctk.CTk):
@@ -53,6 +63,8 @@ class CameraCanvasApp(ctk.CTk):
         self.dwell = DwellSelector()
         self.tip = None
         self.tip_seen = None
+        self.grab_tip = None
+        self.last_pose = None
         self.shape_count = 0
         self.shape_message = ""
         self.shape_message_until = 0.0
@@ -179,7 +191,7 @@ class CameraCanvasApp(ctk.CTk):
         self.fps_value = self._metric(telemetry, "FPS", "—", 2)
         self.position_value = self._metric(telemetry, "Tip X / Y", "—", 3)
         ctk.CTkLabel(
-            sidebar, text="Raise one hand to begin.\nMove your index finger to aim.\nPinch to light up the cursor.",
+            sidebar, text="Hold your fingertip on a shape\nbutton to create it.\nPinch and drag to move the\nselected shape.\nMake a fist to select the next.",
             justify="left", anchor="w", text_color=TEXT,
             font=ctk.CTkFont(size=12), wraplength=200,
         ).grid(row=9, column=0, sticky="ew", padx=20, pady=(20, 8))
@@ -222,16 +234,38 @@ class CameraCanvasApp(ctk.CTk):
         if self.worker:
             self.worker.set_options(self._view_options())
 
-    def _open_3d_scene(self):
+    def _scene(self):
         if not hasattr(self, "scene"):
             from src.scene import Scene
             self.scene = Scene()
+        return self.scene
+
+    def _apply_gesture(self, pose, tip):
+        """Drive the selected 3D shape: pinch-drag moves it, a fist picks the next."""
+        scene = self._scene()
+        if pose == "Pinch" and tip is not None:
+            if self.grab_tip is not None:
+                dx = (tip[0] - self.grab_tip[0]) * MOVE_SCALE_X
+                dy = (self.grab_tip[1] - tip[1]) * MOVE_SCALE_Y  # image Y points down
+                scene.move_selected((dx, dy, 0.0))
+            self.grab_tip = tip
+        else:
+            self.grab_tip = None
+        if pose == "Fist" and self.last_pose != "Fist":
+            selected = scene.select_next()
+            if selected is not None:
+                self.shape_message = f"{selected.name} selected"
+                self.shape_message_until = time.monotonic() + 2.0
+        self.last_pose = pose
+
+    def _open_3d_scene(self):
+        scene = self._scene()
         if hasattr(self, "_scene_thread") and self._scene_thread.is_alive():
             return
 
         def open_window():
             from src.pyglet_viewer import run
-            run(self.scene)
+            run(scene)
 
         self._scene_thread = Thread(target=open_window, daemon=True)
         self._scene_thread.start()
@@ -359,6 +393,7 @@ class CameraCanvasApp(ctk.CTk):
         self.dwell.reset()
         self.tip = None
         self.tip_seen = None
+        self.grab_tip = None
 
     def _shape_layout(self):
         """Keep controls inside the displayed image, including letterboxed views."""
@@ -397,7 +432,6 @@ class CameraCanvasApp(ctk.CTk):
     def _select_shape(self, shape):
         """Create the corresponding object in the shared backend scene."""
         from src.gesture_event import ShapeType
-        from src.shape_factory import ShapeFactory
 
         shape_type = {
             "Cube": ShapeType.CUBE,
@@ -406,12 +440,9 @@ class CameraCanvasApp(ctk.CTk):
         }.get(shape)
         if shape_type is None:
             return
-        if not hasattr(self, "scene"):
-            from src.scene import Scene
-            self.scene = Scene()
-        self.scene.add(ShapeFactory.create(shape_type))
+        self._scene().spawn(shape_type)
         self.shape_count += 1
-        self.shape_message = f"{shape} selected · action {self.shape_count}"
+        self.shape_message = f"{shape} selected · pinch and drag to move it"
         self.shape_message_until = time.monotonic() + 2.0
 
     def _draw_shape_toolbar(self):
@@ -466,6 +497,7 @@ class CameraCanvasApp(ctk.CTk):
         self.tip = frame.cursor
         self.tip_seen = now if frame.cursor is not None else None
         self._update_shape_hover(now)
+        self._apply_gesture(frame.gesture, frame.cursor)
         self._render_image()
         self.hand_value.configure(text=frame.hand)
         self.pose_value.configure(text=frame.gesture)

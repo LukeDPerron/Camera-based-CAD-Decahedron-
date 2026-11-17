@@ -82,6 +82,35 @@ class UiTests(unittest.TestCase):
         self.assertIsNone(self.app.dwell.target)
         self.assertFalse(self.app.canvas.find_withtag("shape_toolbar"))
 
+    def test_pinch_drag_moves_selected_shape_and_fist_selects_next(self):
+        import numpy as np
+        from tracking import Frame
+        from src.gesture_event import ShapeType
+        scene = self.app._scene()
+        first = scene.spawn(ShapeType.CUBE)
+        second = scene.spawn(ShapeType.SPHERE)
+        start = second.transform.position.copy()
+        blank = np.zeros((360, 640, 3), dtype=np.uint8)
+
+        def show(pose, tip):
+            self.app._display_frame(Frame(blank, "Right", pose, tip, 30))
+
+        show("Point", (.2, .2))      # moving without a pinch does nothing
+        show("Point", (.6, .6))
+        np.testing.assert_array_equal(second.transform.position, start)
+        show("Pinch", (.4, .5))      # grab
+        show("Pinch", (.5, .4))      # drag right and up
+        moved = second.transform.position - start
+        self.assertGreater(moved[0], 0)
+        self.assertGreater(moved[1], 0)
+        self.assertEqual(moved[2], 0)
+        show("Point", (.9, .1))      # releasing must not jump the shape
+        show("Pinch", (.1, .1))
+        np.testing.assert_allclose(second.transform.position - start, moved)
+        show("Fist", (.1, .1))
+        show("Fist", (.1, .1))       # holding a fist selects only once
+        self.assertIs(scene.selected, first)
+
     def test_stopped_worker_preserves_error_and_enables_retry(self):
         worker = MagicMock()
         worker.events = SimpleQueue()

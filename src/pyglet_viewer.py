@@ -11,7 +11,6 @@ from pyglet.window import key, mouse
 
 from .gesture_event import ShapeType
 from .scene import Scene
-from .shape_factory import ShapeFactory
 from .scene_objects import Cube, Cylinder, Pyramid, Sphere
 
 
@@ -45,7 +44,7 @@ def _sphere_vertices(radius, slices=16, stacks=10):
         phi1 = math.pi * (i + 1) / stacks
         for j in range(slices):
             theta0 = 2.0 * math.pi * j / slices
-            theta1 = 2.0 * math.pi * (j + 1) % slices
+            theta1 = 2.0 * math.pi * (j + 1) / slices
 
             def point(phi, theta):
                 return (
@@ -125,14 +124,41 @@ def _cylinder_vertices(scale, slices=16):
     return np.asarray(vertices, dtype=np.float32)
 
 
+SHAPE_COLORS = {
+    ShapeType.CUBE: (0.37, 0.90, 0.75),
+    ShapeType.SPHERE: (1.00, 0.76, 0.40),
+    ShapeType.PYRAMID: (0.55, 0.65, 1.00),
+    ShapeType.CYLINDER: (0.95, 0.55, 0.75),
+}
+LIGHT_DIRECTION = np.array([0.4, 0.8, 0.45], dtype=np.float32)
+LIGHT_DIRECTION /= np.linalg.norm(LIGHT_DIRECTION)
+
+
+def _shaded_colors(vertices, base_color, selected):
+    """Per-vertex colours with flat face shading so shapes read as 3D."""
+    triangles = vertices.reshape(-1, 3, 3)
+    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = normals / np.where(lengths < 1e-9, 1.0, lengths)
+    # abs() keeps shading independent of each mesh's triangle winding.
+    brightness = 0.35 + 0.65 * np.abs(normals @ LIGHT_DIRECTION)
+    base = np.asarray(base_color, dtype=np.float32)
+    if not selected:
+        base = base * 0.55
+    faces = np.clip(brightness[:, None] * base[None, :], 0.0, 1.0)
+    return np.repeat(faces, 3, axis=0).astype(np.float32)
+
+
 class PygletSceneWindow(pyglet.window.Window):
     def __init__(self, scene: Scene):
         super().__init__(width=1280, height=720, caption="Decahedron 3D Scene", resizable=True)
         self.scene = scene
-        self.camera_yaw = 45.0
-        self.camera_pitch = 25.0
-        self.camera_distance = 8.0
-        self.camera_target = np.array([0.0, 0.0, 0.0], dtype=float)
+        # Face the spawn row head-on so hand motion right/up maps to world X/Y.
+        self.camera_yaw = 0.0
+        self.camera_pitch = 12.0
+        self.camera_distance = 6.0
+        self.camera_target = np.array([0.0, 0.6, 4.0], dtype=float)
+        pyglet.gl.glClearColor(0.043, 0.063, 0.086, 1.0)
         self.lock = threading.RLock()
         vertex_shader = Shader(VERTEX_SHADER, "vertex")
         fragment_shader = Shader(FRAGMENT_SHADER, "fragment")
@@ -174,7 +200,8 @@ class PygletSceneWindow(pyglet.window.Window):
             local = _cylinder_vertices(obj.transform.scale)
         else:
             return np.empty((0, 3), dtype=np.float32)
-        return local + obj.transform.position.astype(np.float32)
+        # The mesh builders return flat x,y,z runs; offset them per vertex.
+        return local.reshape(-1, 3) + obj.transform.position.astype(np.float32)
 
     def on_draw(self):
         self.clear()
@@ -182,20 +209,23 @@ class PygletSceneWindow(pyglet.window.Window):
         batch = Batch()
         with self.lock:
             objects = list(self.scene.objects)
+            selected = self.scene.selected
 
         for obj in objects:
-            vertices = self._vertices_for(obj)
+            vertices = self._vertices_for(obj).reshape(-1, 3)
             if len(vertices) == 0:
                 continue
-            color = tuple(channel / 255.0 for channel in obj.color)
+            base = SHAPE_COLORS.get(obj.shape_type, (0.7, 0.7, 0.7))
             vertex_count = len(vertices)
-            colors = np.tile(np.asarray(color, dtype=np.float32), (vertex_count, 1)).reshape(-1)
-            batch.add(
+            colors = _shaded_colors(vertices, base, obj is selected).reshape(-1)
+            # pyglet 2 creates vertex lists from the shader program, not the batch.
+            self.program.vertex_list(
                 vertex_count,
                 GL_TRIANGLES,
-                self.shader_group,
-                ("position3f", tuple(float(value) for value in vertices.reshape(-1))),
-                ("color3f", tuple(float(value) for value in colors)),
+                batch=batch,
+                group=self.shader_group,
+                position=("f", vertices.reshape(-1).tolist()),
+                color=("f", colors.tolist()),
             )
 
         pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
@@ -205,11 +235,13 @@ class PygletSceneWindow(pyglet.window.Window):
 
     def on_key_press(self, symbol, modifiers):
         if symbol == key._1:
-            self.scene.add(ShapeFactory.create(ShapeType.CUBE))
+            self.scene.spawn(ShapeType.CUBE)
         elif symbol == key._2:
-            self.scene.add(ShapeFactory.create(ShapeType.SPHERE))
+            self.scene.spawn(ShapeType.SPHERE)
         elif symbol == key._3:
-            self.scene.add(ShapeFactory.create(ShapeType.PYRAMID))
+            self.scene.spawn(ShapeType.PYRAMID)
+        elif symbol == key.TAB:
+            self.scene.select_next()
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         if buttons & mouse.LEFT:
