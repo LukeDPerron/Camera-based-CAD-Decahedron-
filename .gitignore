@@ -228,3 +228,4 @@ create_user.sh
 /ui/models/
 /ui/__pycache__/
 /ui/.test-runtime/
+/Dockerfile
