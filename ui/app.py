@@ -22,7 +22,7 @@ from threading import Thread
 import time
 
 import customtkinter as ctk
-from PIL import Image, ImageOps, ImageTk
+from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 from tracking import CameraWorker, Frame, ViewOptions
 from cameras import CameraDevice, discover_cameras
@@ -60,6 +60,7 @@ class CameraCanvasApp(ctk.CTk):
         self.camera_choices: dict[str, CameraDevice] = {}
         self.camera_scan: Thread | None = None
         self.camera_results = SimpleQueue()
+        self.sidebar_visible = True
         self.restart_camera = False
         self.mirror = tk.BooleanVar(value=True)
         self.landmarks = tk.BooleanVar(value=True)
@@ -102,6 +103,7 @@ class CameraCanvasApp(ctk.CTk):
         workspace.grid_rowconfigure(0, weight=1)
         viewport = ctk.CTkFrame(workspace, fg_color=CANVAS, corner_radius=16)
         viewport.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        self.viewport = viewport
         self.canvas = tk.Canvas(viewport, bg=CANVAS, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True, padx=12, pady=12)
         self.image_item = self.canvas.create_image(0, 0, anchor="center")
@@ -110,11 +112,26 @@ class CameraCanvasApp(ctk.CTk):
             font=("Helvetica", 15), width=500,
         )
         self.canvas.bind("<Configure>", self._resize_canvas)
+        self.sidebar = ctk.CTkFrame(workspace, fg_color=PANEL, corner_radius=16)
+        self.sidebar.grid(row=0, column=1, sticky="ns")
+        # Draw a crisp sidebar symbol without depending on platform icon fonts.
+        icon = Image.new("RGBA", (48, 48))
+        draw = ImageDraw.Draw(icon)
+        draw.rounded_rectangle((7, 9, 41, 39), radius=4, outline=TEXT, width=3)
+        draw.line((29, 10, 29, 38), fill=TEXT, width=3)
+        self.sidebar_icon = ctk.CTkImage(light_image=icon, dark_image=icon, size=(20, 20))
+        self.sidebar_toggle = ctk.CTkButton(
+            self.sidebar, text="", image=self.sidebar_icon,
+            command=self._toggle_sidebar, width=32, height=32,
+            fg_color="transparent", hover_color="#243341", corner_radius=8,
+        )
+        self.sidebar_toggle.pack(anchor="e", padx=6, pady=(6, 2))
         sidebar = ctk.CTkScrollableFrame(
-            workspace, width=226, fg_color=PANEL, corner_radius=16,
+            self.sidebar, width=226, fg_color=PANEL, corner_radius=16,
             scrollbar_button_color="#344353",
         )
-        sidebar.grid(row=0, column=1, sticky="ns")
+        sidebar.pack(fill="both", expand=True)
+        self.sidebar_content = sidebar
         sidebar.grid_columnconfigure(0, weight=1)
         self._section(sidebar, "CAMERA", 0, top=22)
         camera_row = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -165,6 +182,14 @@ class CameraCanvasApp(ctk.CTk):
             justify="left", anchor="w", text_color=MUTED,
             font=ctk.CTkFont(size=11), wraplength=200,
         ).grid(row=10, column=0, sticky="ew", padx=20, pady=(0, 18))
+
+    def _toggle_sidebar(self):
+        self.sidebar_visible = not self.sidebar_visible
+        self._reset_dwell()
+        if self.sidebar_visible:
+            self.sidebar_content.pack(fill="both", expand=True)
+        else:
+            self.sidebar_content.pack_forget()
 
     @staticmethod
     def _section(parent, text, row, top=22):
@@ -324,9 +349,9 @@ class CameraCanvasApp(ctk.CTk):
         scale = min(max(1, width) / iw, max(1, height) / ih)
         fw, fh = int(iw * scale), int(ih * scale)
         left, top = (width - fw) / 2, (height - fh) / 2
-        bw = min(76, (fw - 48) / 3)
-        bh = min(60, fh * .28)
-        gap = 10
+        bw = min(44, (fw - 48) / 3)
+        bh = min(44, fh * .28)
+        gap = 8
         x = left + (fw - (3 * bw + 2 * gap)) / 2
         bottom = top + fh - 12
         buttons = [(name, (x + i * (bw + gap), bottom - bh,
@@ -370,10 +395,9 @@ class CameraCanvasApp(ctk.CTk):
         for name, (a, b, d, e) in buttons:
             active = self.dwell.target == name
             color = ACCENT if active else TEXT
-            c.create_rectangle(a, b, d, e, fill=PANEL,
-                               outline=ACCENT if active else "#344353", width=2, tags=tag)
-            cx, cy = (a + d) / 2, b + (e - b) * .36
-            r = min(16, (e - b) * .22)
+            c.create_oval(a, b, d, e, fill=PANEL, outline="", tags=tag)
+            cx, cy = (a + d) / 2, (b + e) / 2
+            r = min(10, (e - b) * .23)
             if name == "Cube":
                 c.create_polygon(cx, cy-r, cx+r, cy-r/2, cx+r, cy+r/2,
                                  cx, cy+r, cx-r, cy+r/2, cx-r, cy-r/2,
@@ -389,11 +413,10 @@ class CameraCanvasApp(ctk.CTk):
                 c.create_polygon(cx, cy-r, cx+r, cy+r/2, cx, cy+r,
                                  cx-r, cy+r/2, fill="", outline=color, width=2, tags=tag)
                 c.create_line(cx, cy-r, cx, cy+r, fill=color, width=2, tags=tag)
-            c.create_text(cx, e - 16, text=name, fill=color,
-                          font=("Helvetica", 11), tags=tag)
-            if active:
-                c.create_rectangle(a + 3, e - 6, a + 3 + (d-a-6)*self.dwell.progress,
-                                   e - 3, fill=ACCENT, outline="", tags=tag)
+            if active and self.dwell.progress > 0:
+                c.create_arc(a + 1, b + 1, d - 1, e - 1, start=90,
+                             extent=-359.9 * self.dwell.progress, style="arc",
+                             outline=ACCENT, width=2, tags=tag)
         # Keep the aiming point visible above the buttons covering the video.
         if tip is not None and self.cursor.get():
             x, y = tip

@@ -87,6 +87,9 @@ contain paths from another computer.
 
 - The default camera starts automatically. Allow the operating system's camera
   permission prompt. Raise one hand with your whole palm in view.
+- Use the **sidebar icon** at the top of the sidebar to collapse the controls and
+  expand the camera canvas. Click it again on the collapsed rail to restore your
+  controls with settings preserved.
 - Toggle **Mirror camera**, **Hand landmarks**, and **Fingertip cursor** independently.
 - The side panel shows handedness, pose, processed FPS, and normalized fingertip
   coordinates (top left is `0 / 0`, bottom right is `1 / 1`).
