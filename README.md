@@ -33,6 +33,27 @@ python ui/app.py
 
 The UI branch provides the camera canvas, tracking helpers, gesture dwell handling, and UI tests. The backend event contract remains independent of the UI implementation.
 
+## 3D scene and physics
+
+Open the Pyglet 3D scene from the CustomTkinter UI with **Open 3D scene**, or run it directly:
+
+```text
+python -m src.pyglet_viewer
+```
+
+The 3D scene includes cubes, spheres, pyramids/triangles, orbiting camera controls, gravity, ground collisions, and object collisions.
+
+| Control | Action |
+|---|---|
+| `1` | Create a cube |
+| `2` | Create a sphere |
+| `3` | Create a pyramid |
+| Left mouse drag | Orbit the camera |
+| Mouse wheel | Zoom |
+| `G` | Toggle gravity |
+| `P` | Pause physics |
+| `Delete` | Delete the selected object |
+
 ## Tests
 
 Run the backend tests with:

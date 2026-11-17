@@ -19,6 +19,7 @@ class ShapeType(str, Enum):
     CUBE = "CUBE"
     SPHERE = "SPHERE"
     CYLINDER = "CYLINDER"
+    PYRAMID = "PYRAMID"
 
 
 # Groupmate labels from data_collection/collect_gestures.py

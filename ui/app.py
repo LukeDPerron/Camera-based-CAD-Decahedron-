@@ -155,6 +155,12 @@ class CameraCanvasApp(ctk.CTk):
             height=38, font=ctk.CTkFont(size=13, weight="bold"), state="disabled",
         )
         self.camera_button.grid(row=2, column=0, sticky="ew", padx=20, pady=(14, 0))
+        self.scene_button = ctk.CTkButton(
+            sidebar, text="Open 3D scene", command=self._open_3d_scene,
+            fg_color="#344353", hover_color="#46596C", text_color=TEXT,
+            height=38, font=ctk.CTkFont(size=13, weight="bold"),
+        )
+        self.scene_button.grid(row=2, column=0, sticky="ew", padx=20, pady=(58, 0))
         self._section(sidebar, "VIEW", 3)
         for row, (label, variable) in enumerate(
             (("Mirror camera", self.mirror), ("Hand landmarks", self.landmarks),
@@ -215,6 +221,20 @@ class CameraCanvasApp(ctk.CTk):
         self._reset_dwell()
         if self.worker:
             self.worker.set_options(self._view_options())
+
+    def _open_3d_scene(self):
+        if not hasattr(self, "scene"):
+            from src.scene import Scene
+            self.scene = Scene()
+        if hasattr(self, "_scene_thread") and self._scene_thread.is_alive():
+            return
+
+        def open_window():
+            from src.pyglet_viewer import run
+            run(self.scene)
+
+        self._scene_thread = Thread(target=open_window, daemon=True)
+        self._scene_thread.start()
 
     def refresh_cameras(self, auto_start=False):
         if self.closing or self.camera_scan or self.worker:
@@ -375,7 +395,21 @@ class CameraCanvasApp(ctk.CTk):
             self._select_shape(selected)
 
     def _select_shape(self, shape):
-        """Placeholder action hook for future geometry creation."""
+        """Create the corresponding object in the shared backend scene."""
+        from src.gesture_event import ShapeType
+        from src.shape_factory import ShapeFactory
+
+        shape_type = {
+            "Cube": ShapeType.CUBE,
+            "Sphere": ShapeType.SPHERE,
+            "Pyramid": ShapeType.PYRAMID,
+        }.get(shape)
+        if shape_type is None:
+            return
+        if not hasattr(self, "scene"):
+            from src.scene import Scene
+            self.scene = Scene()
+        self.scene.add(ShapeFactory.create(shape_type))
         self.shape_count += 1
         self.shape_message = f"{shape} selected · action {self.shape_count}"
         self.shape_message_until = time.monotonic() + 2.0

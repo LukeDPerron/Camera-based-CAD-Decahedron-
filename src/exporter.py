@@ -4,7 +4,7 @@ import struct
 import numpy as np
 
 from .scene import Scene
-from .scene_objects import Cube, Cylinder, Sphere
+from .scene_objects import Cube, Cylinder, Pyramid, Sphere
 
 
 class GLTFExporter:
@@ -89,6 +89,18 @@ def _mesh_for(obj):
         r = 0.22 * float(np.mean(obj.transform.scale[:2]))
         h = 0.5 * float(obj.transform.scale[1])
         return _cylinder(r, h)
+    if isinstance(obj, Pyramid):
+        s = 0.35 * obj.transform.scale
+        x, y, z = s
+        v = np.array(
+            [
+                [-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z],
+                [0.0, y, 0.0],
+            ],
+            dtype=float,
+        )
+        t = [(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4), (0, 3, 2), (0, 2, 1)]
+        return v, t
     s = 0.35 * obj.transform.scale
     return _box(s)
 

@@ -31,3 +31,12 @@ class Scene:
         if self.selected is None:
             return
         self.selected.translate(axis, amount)
+
+    def scale_selected(self, amount: float) -> None:
+        if self.selected is not None:
+            self.selected.apply_scale(amount)
+
+    def delete_selected(self) -> None:
+        if self.selected is not None:
+            self.objects.remove(self.selected)
+            self.selected = self.objects[-1] if self.objects else None
