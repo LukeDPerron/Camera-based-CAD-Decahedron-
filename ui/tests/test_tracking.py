@@ -142,10 +142,6 @@ class PoseTests(unittest.TestCase):
         self.assertEqual(classify_pose([Point(x=0, y=0, z=0)] * 21).name, "Tracking")
 
 
-<<<<<<< HEAD
->>>>>>> milesBranch
-=======
->>>>>>> d491729e90aeefba9e282afc076d756ac96f8e55
 class CameraTests(unittest.TestCase):
     def test_native_backends_fall_back_and_release_failed_capture(self):
         import cv2

@@ -6,7 +6,6 @@ reference CSV collection script is collecting training data for.
 
 from dataclasses import dataclass
 from math import atan2, cos, dist, hypot, pi, sin
->>>>>>> milesBranch
 from typing import Sequence
 
 
@@ -29,11 +28,6 @@ def _straight(points, base: int, joint: int, tip: int) -> bool:
     if magnitude < 1e-10:
         return False
     cosine = sum(x * y for x, y in zip(v, w)) / magnitude
-<<<<<<< HEAD
-    # Allow a relaxed bend and measure reach from the finger's own knuckle.
-    # A wrist-distance test can reject extended fingers on a front-on palm.
-=======
->>>>>>> milesBranch
     return cosine < -0.5 and dist(a, c) >= 0.85 * (dist(a, b) + dist(b, c))
 
 
@@ -139,7 +133,6 @@ def classify_pose(world_landmarks: Sequence, was_pinching: bool = False, *,
             return Pose("Point up")
         if base[2] - tip[2] >= 0.70 * length:
             return Pose("Cursor")
->>>>>>> milesBranch
         return Pose("Point")
     if folded:
         return Pose("Thumb out" if thumb_out >= 1.6 else "Fist")
