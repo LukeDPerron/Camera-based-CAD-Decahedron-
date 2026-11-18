@@ -9,6 +9,9 @@ from math import atan2, cos, dist, hypot, pi, sin
 from typing import Sequence
 
 
+PALM_POSE = "Palm"
+
+
 @dataclass(frozen=True)
 class Pose:
     name: str
@@ -125,7 +128,7 @@ def classify_pose(world_landmarks: Sequence, was_pinching: bool = False, *,
     if pinch_ratio < (0.55 if was_pinching else 0.42):
         return Pose("Pinch", pinching=True, pinky_up=extended[3])
     if all(extended):
-        return Pose("Palm")
+        return Pose(PALM_POSE)
     if extended == [True, False, False, False]:
         base, tip = _xyz(points[5]), _xyz(points[8])
         length = dist(base, tip)

@@ -11,30 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
-<<<<<<< HEAD
-<<<<<<< HEAD
+from gestures import SixSevenMotion, classify_pose, palm_pitch, palm_roll, palm_yaw
 from test_gestures import hand_points
 from tracking import CameraWorker, ViewOptions, open_camera
-
-
-=======
-=======
->>>>>>> d491729e90aeefba9e282afc076d756ac96f8e55
-from gestures import SixSevenMotion, classify_pose, palm_pitch, palm_roll, palm_yaw
-from tracking import CameraWorker, ViewOptions, open_camera
-
-
-def hand_points(extended=(True, True, True, True)):
-    points = [Point(x=0.0, y=0.0, z=0.0) for _ in range(21)]
-    points[4] = Point(x=-1.3, y=0.5, z=0)
-    for x, (base, joint, tip), straight in zip(
-        (-0.5, -0.15, 0.2, 0.5),
-        ((5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20)), extended,
-    ):
-        points[base] = Point(x=x, y=1.0, z=0)
-        points[joint] = Point(x=x, y=1.5, z=0)
-        points[tip] = Point(x=x, y=2.5 if straight else 1.0, z=0)
-    return points
 
 
 class PoseTests(unittest.TestCase):
@@ -118,7 +97,7 @@ class PoseTests(unittest.TestCase):
         self.assertEqual(classify_pose(hand_points((False,) * 4)).name, "Thumb out")
 
     def test_open_palm(self):
-        self.assertEqual(classify_pose(hand_points()).name, "Open palm")
+        self.assertEqual(classify_pose(hand_points()).name, "Palm")
 
     def test_index_only_point(self):
         self.assertEqual(classify_pose(hand_points((True, False, False, False))).name, "Point")

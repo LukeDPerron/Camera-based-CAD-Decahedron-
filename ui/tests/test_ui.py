@@ -152,12 +152,12 @@ class UiTests(unittest.TestCase):
         send((.7, .4), "Point up")
         y = obj.transform.position[1]
         self.assertGreater(y, 0)
-        send((.6, .5), "Open palm")
-        send((.7, .4), "Open palm")
+        send((.6, .5), "Palm")
+        send((.7, .4), "Palm")
         expected = (x, y, 4 * np.exp(.4))
         np.testing.assert_allclose(obj.transform.position, expected)
         send(None, "—")
-        send((.9, .9), "Open palm")
+        send((.9, .9), "Palm")
         np.testing.assert_allclose(obj.transform.position, expected)
         send((.9, .9), pinching=True)
         self.assertFalse(self.app.interaction.selected)
@@ -292,6 +292,8 @@ class UiTests(unittest.TestCase):
     def test_pinky_pinch_group_moves_rotates_and_deletes_together(self):
         from math import pi
         import numpy as np
+        from gestures import classify_pose
+        from test_gestures import hand_points
         from tracking import Frame
 
         for shape in ("Cube", "Sphere", "Pyramid"):
@@ -313,12 +315,15 @@ class UiTests(unittest.TestCase):
         send(.8, (.6, .5), "Thumb out")
         self.assertGreater(cube.transform.position[0], 0)
         self.assertGreater(sphere.transform.position[0], -1.1)
-        send(.9, (.6, .5), "Open palm")
-        send(1.0, (.6, .5), "Open palm", roll=pi / 2)
+        palm = classify_pose(hand_points()).name
+        send(.9, (.6, .5), palm)
+        send(1.0, (.6, .5), palm, roll=pi / 2)
         np.testing.assert_allclose([cube.transform.rotation[2], sphere.transform.rotation[2]],
                                    [pi / 2, pi / 2])
         self.assertGreater(cube.transform.position[1], sphere.transform.position[1])
-        send(1.1, (.6, .5), "Fist")
+        fist_points = hand_points((False,) * 4)
+        fist_points[4] = fist_points[8]
+        send(1.1, (.6, .5), classify_pose(fist_points).name)
         self.assertEqual(self.app.scene.objects, [pyramid])
         self.assertFalse(self.app.interaction.selected)
         self.assertEqual(len(self.app.effects.explosions), 2)

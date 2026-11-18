@@ -5,10 +5,11 @@ from math import cos, exp, isfinite, sin
 import numpy as np
 
 from face_snap import snap_faces
+from gestures import PALM_POSE
 from scene_overlay import pick_shape, rotation_angles, rotation_matrix
 
 
-LEGACY_AXES = {"Thumb out": 0, "Point up": 1, "Open palm": 2}
+LEGACY_AXES = {"Thumb out": 0, "Point up": 1, PALM_POSE: 2}
 RELEASE_GRACE = 0.25
 TRACKING_GRACE = 0.50
 PINCH_DEPTH_GAIN = 2.5
@@ -53,7 +54,7 @@ class ShapeInteraction:
         updated = self.mode == "Updated"
 
         if not frame.pinching and self.selected:
-            if frame.gesture == "Open palm":
+            if frame.gesture == PALM_POSE:
                 self.last_open_palm = now
             elif (frame.gesture == "Fist" and self.last_open_palm is not None
                   and now - self.last_open_palm <= DELETE_WINDOW):
