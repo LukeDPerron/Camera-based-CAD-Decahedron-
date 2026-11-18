@@ -11,6 +11,7 @@ class Transform:
     position: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 4.0], dtype=float))
     rotation: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
     scale: np.ndarray = field(default_factory=lambda: np.ones(3, dtype=float))
+    mesh_deformation: np.ndarray = field(default_factory=lambda: np.eye(3))
 
 
 class SceneObject(ABC):
@@ -45,7 +46,8 @@ class Cube(SceneObject):
             (0, 4, 5, 1), (2, 3, 7, 6),
             (0, 2, 6, 4), (1, 5, 7, 3),
         ]
-        return {"kind": "wire", "local_points": corners, "edges": edges, "faces": faces}
+        return {"kind": "wire", "local_points": corners @ self.transform.mesh_deformation,
+                "edges": edges, "faces": faces}
 
 
 class Sphere(SceneObject):
@@ -102,5 +104,8 @@ class Pyramid(SceneObject):
             ],
             dtype=float,
         )
-        faces = [(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4), (0, 3, 2), (0, 2, 1)]
-        return {"kind": "triangles", "local_points": points, "faces": faces}
+        sides = [(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4)]
+        faces = sides + [(0, 3, 2), (0, 2, 1)]
+        return {"kind": "triangles", "local_points": points @ self.transform.mesh_deformation,
+                "faces": faces,
+                "contact_faces": sides + [(0, 3, 2, 1)]}

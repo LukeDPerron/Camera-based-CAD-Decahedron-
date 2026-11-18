@@ -35,16 +35,18 @@ Click a Cube, Sphere, or Pyramid icon at the bottom of the live camera feed, or 
 
 Aim at a shape and pinch to select it. The selected shape gets an amber outline.
 
-- **Updated** is the default. Hold the pinch and move your hand across the image or toward and away from the lens. Release to drop the shape. Depth is estimated from apparent palm size, so keeping your hand at a steady angle helps.
+- **Updated** is the default. Pinch once to grab, then open your fingers and move or turn your hand. The shape follows your index finger until you pinch again to drop it. Depth is estimated from apparent palm size.
 - **Legacy** keeps the selection when you release the pinch. Pinch again to deselect. Extend your thumb from a fist and move left or right for X. Point your index finger up and move vertically for Y. With an open palm, sweep up to move the shape farther away or down to bring it closer on Z.
 
 Hold up only your middle finger for about a second to close the app.
 
-In either mode, twist your pinched hand clockwise or counterclockwise to rotate the shape around the grab point.
+Twist your hand clockwise or counterclockwise to rotate around the grab point. In Updated mode, point your index finger up and turn your wrist for side-to-side rotation. Tip your whole hand so your fingertips lean toward or away from the lens to roll the shape forward or backward. In Legacy mode, hold the pinch while twisting.
 
-Pinch with your pinky extended to add or remove the shape you are pointing at. Movement and rotation apply to every selected shape. In Legacy mode, twisting an open palm also rotates the selection. To delete the selection in either mode, show an open palm and then make a fist within one second.
+Pinch with your pinky extended to add or remove the shape you are pointing at. In Updated mode, keep your pinky up while building a selection, then lower it to move the group. Multiple selected shapes move together and orbit their shared center when rotated. In Legacy mode, twisting an open palm also rotates the selection. To delete the selection in either mode, show an open palm and then make a fist within one second.
 
 Show both hands and bounce them in opposite directions, one up while the other goes down. After two reversals, **6** and **7** follow your hands while the motion continues. Touch your thumb, middle finger, and ring finger together while extending your index finger and pinky to show the cat. Deleting a shape plays a fading explosion at its position.
+
+Turn on **Snap to faces** and move a cube or pyramid close to another one with two faces facing each other. The moving face aligns and resizes to the target face, then the app releases the selection. A triangle and a square match in width and height while keeping their outlines. Pinch the object again to move it. Turn on **Track one hand** to restart tracking with a single-hand limit.
 
 ## 3D scene
 

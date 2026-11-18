@@ -20,6 +20,9 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 
 from gestures import SixSevenMotion, classify_pose, palm_roll as estimate_palm_roll
+from gestures import palm_pitch as estimate_palm_pitch
+from gestures import palm_yaw as estimate_palm_yaw
+from gestures import pinky_extended
 from cameras import CameraDevice, resolve_camera
 
 
@@ -42,6 +45,7 @@ class ViewOptions:
     mirror: bool = True
     landmarks: bool = True
     cursor: bool = True
+    single_hand: bool = False
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,9 @@ class Frame:
     cat: tuple[float, float] | None = None
     six_seven: tuple[tuple[float, float], tuple[float, float]] | None = None
     hand_count: int = 0
+    index_tip: tuple[float, float] | None = None
+    palm_yaw: float | None = None
+    palm_pitch: float | None = None
 
 
 def ensure_model() -> Path:
@@ -156,7 +163,7 @@ class CameraWorker(Thread):
                         delegate=mp_python.BaseOptions.Delegate.CPU,
                     ),
                     running_mode=vision.RunningMode.VIDEO,
-                    num_hands=2,
+                    num_hands=1 if self._options.single_hand else 2,
                     min_hand_detection_confidence=0.6,
                     min_hand_presence_confidence=0.6,
                     min_tracking_confidence=0.5,
@@ -178,7 +185,7 @@ class CameraWorker(Thread):
             pose_frames = 0
             pinching = False
             primary = None
-            previous_roll = last_hand_seen = None
+            previous_roll = previous_yaw = previous_pitch = last_hand_seen = None
             previous_mirror = None
             six_seven_motion = SixSevenMotion()
             while not self.stop_event.is_set():
@@ -205,7 +212,8 @@ class CameraWorker(Thread):
                     mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp
                 )
                 hand, gesture, cursor = "No hand", "—", None
-                palm = palm_scale = palm_roll = None
+                index_tip = None
+                palm = palm_scale = palm_roll = palm_yaw = palm_pitch = None
                 pinky_up = False
                 cat = None
                 palms = {}
@@ -223,12 +231,13 @@ class CameraWorker(Thread):
                         stable_pose = pending_pose = "Tracking"
                         pose_frames = 0
                         pinching = False
-                        previous_roll = None
+                        previous_roll = previous_yaw = previous_pitch = None
                     primary = labels[index]
                     last_hand_seen = sample_time
                     previous_mirror = options.mirror
                     landmarks = result.hand_landmarks[index]
-                    pose = classify_pose(result.hand_world_landmarks[index], pinching,
+                    primary_world = result.hand_world_landmarks[index]
+                    pose = classify_pose(primary_world, pinching,
                                          image_landmarks=landmarks, aspect=aspect)
                     for hand_index, world_points in enumerate(result.hand_world_landmarks):
                         hand_points = result.hand_landmarks[hand_index]
@@ -241,7 +250,7 @@ class CameraWorker(Thread):
                         if hand_pose.name == "Cat" and (cat is None or hand_index == index):
                             cat = (knuckle.x, knuckle.y)
                     pinching = pose.pinching
-                    pinky_up = pose.pinky_up
+                    pinky_up = pose.pinky_up if pinching else pinky_extended(primary_world)
                     pose_frames = pose_frames + 1 if pending_pose == pose.name else 1
                     pending_pose = pose.name
                     if pose_frames >= 3:
@@ -250,20 +259,25 @@ class CameraWorker(Thread):
                     if gesture == "Middle finger" and pose.name != gesture:
                         gesture = pose.name
                     hand = display_labels[index]
-                    cursor = (landmarks[8].x, landmarks[8].y)
+                    index_tip = cursor = (landmarks[8].x, landmarks[8].y)
                     if pinching:
                         cursor = ((cursor[0] + landmarks[4].x) / 2,
                                   (cursor[1] + landmarks[4].y) / 2)
-                    wrist, index, middle, pinky = (landmarks[i] for i in (0, 5, 9, 17))
+                    wrist, middle = landmarks[0], landmarks[9]
                     palm = palms[hand]
                     palm_dx = (middle.x - wrist.x) * aspect
                     palm_dy = wrist.y - middle.y
                     palm_length = hypot(palm_dx, palm_dy)
-                    palm_scale = (
-                        hypot((index.x - pinky.x) * aspect, index.y - pinky.y)
-                        + palm_length
-                    ) / 2
+                    # Compensate for the palm looking shorter when it tilts.
+                    world_wrist, world_middle = primary_world[0], primary_world[9]
+                    planar = hypot(world_middle.x - world_wrist.x,
+                                   world_middle.y - world_wrist.y)
+                    full_span = hypot(planar, world_middle.z - world_wrist.z)
+                    palm_scale = (palm_length * full_span / max(planar, 0.55 * full_span)
+                                  if palm_length >= 0.002 and full_span > 0 else None)
                     palm_roll = previous_roll = estimate_palm_roll(landmarks, aspect, previous_roll)
+                    palm_yaw = previous_yaw = estimate_palm_yaw(primary_world, previous_yaw)
+                    palm_pitch = previous_pitch = estimate_palm_pitch(primary_world, previous_pitch)
                     draw_overlay(rgb, landmarks, options, pinching, cursor)
                 else:
                     stable_pose = pending_pose = "Tracking"
@@ -275,7 +289,7 @@ class CameraWorker(Thread):
                 previous = now
                 packet = Frame(rgb, hand, gesture, cursor, fps, cursor is not None and pinching,
                                palm, palm_scale, palm_roll, pinky_up, cat, six_seven,
-                               len(result.hand_landmarks))
+                               len(result.hand_landmarks), index_tip, palm_yaw, palm_pitch)
                 # Keep only the newest frame so inference never queues behind Tk.
                 try:
                     self.frames.get_nowait()

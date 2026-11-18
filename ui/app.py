@@ -80,6 +80,8 @@ class CameraCanvasApp(ctk.CTk):
         self.mirror = tk.BooleanVar(value=True)
         self.landmarks = tk.BooleanVar(value=True)
         self.cursor = tk.BooleanVar(value=True)
+        self.single_hand = tk.BooleanVar(value=False)
+        self.snap_to_faces = tk.BooleanVar(value=False)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._build_header()
@@ -196,9 +198,18 @@ class CameraCanvasApp(ctk.CTk):
                 progress_color=ACCENT, button_color=TEXT, text_color=TEXT,
                 font=ctk.CTkFont(size=13), switch_width=36, switch_height=20,
             ).grid(row=row, column=0, sticky="w", padx=20, pady=(0, 14))
-        self._section(sidebar, "TRACKING", 10, top=10)
+        for row, (label, variable, command) in enumerate(
+            (("Snap to faces", self.snap_to_faces, self._update_face_snap),
+             ("Track one hand", self.single_hand, self._update_hand_limit)), start=10
+        ):
+            ctk.CTkSwitch(
+                sidebar, text=label, variable=variable, command=command,
+                progress_color=ACCENT, button_color=TEXT, text_color=TEXT,
+                font=ctk.CTkFont(size=13), switch_width=36, switch_height=20,
+            ).grid(row=row, column=0, sticky="w", padx=20, pady=(0, 14))
+        self._section(sidebar, "TRACKING", 12, top=10)
         telemetry = ctk.CTkFrame(sidebar, fg_color=BG, corner_radius=10)
-        telemetry.grid(row=11, column=0, sticky="ew", padx=16, pady=(0, 16))
+        telemetry.grid(row=13, column=0, sticky="ew", padx=16, pady=(0, 16))
         self.hand_value = self._metric(telemetry, "Hand", "No hand", 0)
         self.pose_value = self._metric(telemetry, "Pose", "—", 1)
         self.fps_value = self._metric(telemetry, "FPS", "—", 2)
@@ -206,11 +217,13 @@ class CameraCanvasApp(ctk.CTk):
 
     def _set_gesture_mode(self, mode):
         self.interaction.mode = mode
+        self.interaction.grabbed = False
+        self.interaction.waiting_for_pinky_down = False
         self.interaction.reset_motion()
         if mode == "Legacy":
             help_text = "Pinch to select. Thumb out moves X, point up moves Y. Sweep an open palm to move Z or twist it to rotate."
         else:
-            help_text = "Pinch and hold to grab. Move across the frame or toward and away from the camera. Release to drop."
+            help_text = "Pinch once to grab. Move or turn your hand with your fingers open. Pinch again to drop."
         self.mode_help.configure(text=help_text + "\nPinky-up pinch adds or removes shapes. Open palm then fist deletes the selection.")
 
     def _toggle_sidebar(self):
@@ -239,7 +252,16 @@ class CameraCanvasApp(ctk.CTk):
         return label
 
     def _view_options(self):
-        return ViewOptions(self.mirror.get(), self.landmarks.get(), self.cursor.get())
+        return ViewOptions(self.mirror.get(), self.landmarks.get(), self.cursor.get(),
+                           self.single_hand.get())
+
+    def _update_face_snap(self):
+        self.interaction.snap_to_faces = self.snap_to_faces.get()
+
+    def _update_hand_limit(self):
+        if self.worker and self.worker.is_alive() and not self.worker.stop_event.is_set():
+            self.restart_camera = True
+            self._stop_camera("Changing hand tracking…")
 
     def _update_options(self):
         self._reset_dwell()
@@ -384,8 +406,8 @@ class CameraCanvasApp(ctk.CTk):
         scale = min(max(1, width) / iw, max(1, height) / ih)
         fw, fh = int(iw * scale), int(ih * scale)
         left, top = (width - fw) / 2, (height - fh) / 2
-        bw = min(44, (fw - 48) / 3)
-        bh = min(44, fh * .28)
+        bw = min(48, (fw - 48) / 3)
+        bh = min(48, fh * .28)
         gap = 8
         x = left + (fw - (3 * bw + 2 * gap)) / 2
         bottom = top + fh - 12
@@ -442,7 +464,7 @@ class CameraCanvasApp(ctk.CTk):
             color = ACCENT if active else TEXT
             c.create_oval(a, b, d, e, fill=PANEL, outline="", tags=tag)
             cx, cy = (a + d) / 2, (b + e) / 2
-            r = min(10, (e - b) * .23)
+            r = min(11, (e - b) * .23)
             if name == "Cube":
                 c.create_polygon(cx, cy-r, cx+r, cy-r/2, cx+r, cy+r/2,
                                  cx, cy+r, cx-r, cy+r/2, cx-r, cy-r/2,
@@ -492,7 +514,8 @@ class CameraCanvasApp(ctk.CTk):
                                                 now, over_toolbar=toolbar_target is not None)
             for obj in destroyed or ():
                 self.effects.explode(shape_center(obj, self.last_image.size), now)
-        if effect_pose or self.interaction.pinching or self.interaction.anchor is not None or quit_target is not None:
+        if (effect_pose or self.interaction.pinching or self.interaction.waiting_for_pinky_down
+                or self.interaction.anchor is not None or quit_target is not None):
             toolbar_target = None
         selected_shape = self.dwell.update(toolbar_target, now)
         if selected_shape is not None:

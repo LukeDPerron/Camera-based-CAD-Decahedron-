@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
-from gestures import SixSevenMotion, classify_pose, palm_roll
+from gestures import SixSevenMotion, classify_pose, palm_pitch, palm_roll, palm_yaw
 from tracking import CameraWorker, ViewOptions, open_camera
 
 
@@ -29,6 +29,25 @@ def hand_points(extended=(True, True, True, True)):
 
 
 class PoseTests(unittest.TestCase):
+    def test_palm_pitch_distinguishes_forward_and_backward_tilts(self):
+        from math import pi
+
+        for direction in (-1, 1):
+            points = [Point(x=p.x, y=-p.y, z=direction * p.y) for p in hand_points()]
+            self.assertAlmostEqual(palm_pitch(points, None), direction * pi / 4)
+
+    def test_palm_yaw_detects_a_twist_with_an_upright_index(self):
+        from math import pi
+
+        hand = [Point(x=p.x, y=-p.y, z=p.z)
+                for p in hand_points((True, False, False, False))]
+        self.assertEqual(classify_pose(hand).name, "Point up")
+        edge_on = [Point(x=p.z, y=p.y, z=-p.x) for p in hand]
+        self.assertEqual(classify_pose(edge_on).name, "Point up")
+        self.assertAlmostEqual(palm_yaw(hand, None), 0)
+        self.assertAlmostEqual(palm_yaw(edge_on, None), pi / 2)
+        self.assertGreater(palm_yaw(edge_on, 0), pi / 4)
+
     def test_projected_fingertip_overlap_sustains_only_an_existing_pinch(self):
         points = hand_points()
         points[4] = Point(x=points[8].x, y=points[8].y, z=.8)
@@ -265,6 +284,15 @@ class WorkerTests(unittest.TestCase):
         cap.release.assert_called_once()
         detector.close.assert_called_once()
         self.assertIn(("error", "inference failed"), self._events(worker))
+
+    def test_single_hand_option_limits_the_detector(self):
+        worker, _, detector = self._setup()
+        worker.set_options(ViewOptions(single_hand=True))
+        with patch("tracking.ensure_model", return_value=Path("unused.task")), patch(
+            "tracking.vision.HandLandmarker.create_from_options", return_value=detector
+        ) as create, patch("tracking.open_camera", side_effect=RuntimeError("camera unavailable")):
+            worker.run()
+        self.assertEqual(create.call_args.args[0].num_hands, 1)
 
     def test_camera_open_failure_closes_model(self):
         worker, _, detector = self._setup()

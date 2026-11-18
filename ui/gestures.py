@@ -31,6 +31,10 @@ def _straight(points, base: int, joint: int, tip: int) -> bool:
     return cosine < -0.5 and dist(a, c) >= 0.85 * (dist(a, b) + dist(b, c))
 
 
+def pinky_extended(points: Sequence) -> bool:
+    return len(points) == 21 and _straight(points, 17, 18, 20)
+
+
 def palm_roll(image_landmarks: Sequence, aspect: float, previous: float | None) -> float | None:
     """Estimate in-plane rotation from the wrist and four knuckles."""
     wrist = image_landmarks[0]
@@ -55,6 +59,35 @@ def palm_roll(image_landmarks: Sequence, aspect: float, previous: float | None) 
     return previous + 0.55 * atan2(sin(delta), cos(delta))
 
 
+def palm_yaw(world_landmarks: Sequence, previous: float | None) -> float | None:
+    """Track an upright wrist twist from the depth of the outer knuckles."""
+    index, pinky = world_landmarks[5], world_landmarks[17]
+    x, y, z = (pinky.x - index.x, pinky.y - index.y, pinky.z - index.z)
+    across = hypot(x, z)
+    if across < max(1e-8, 0.30 * hypot(x, y, z)):
+        return previous
+    return _smooth_tilt(atan2(-z, x), previous)
+
+
+def palm_pitch(world_landmarks: Sequence, previous: float | None) -> float | None:
+    """Track forward and backward tilt using the wrist-to-knuckles axis."""
+    wrist = world_landmarks[0]
+    knuckles = [world_landmarks[i] for i in (5, 9, 13, 17)]
+    x = sum(p.x for p in knuckles) / 4 - wrist.x
+    y = wrist.y - sum(p.y for p in knuckles) / 4
+    z = sum(p.z for p in knuckles) / 4 - wrist.z
+    if hypot(y, z) < max(1e-8, 0.30 * hypot(x, y, z)):
+        return previous
+    return _smooth_tilt(atan2(z, y), previous)
+
+
+def _smooth_tilt(angle: float, previous: float | None) -> float:
+    if previous is None:
+        return angle
+    delta = angle - previous
+    return previous + 0.65 * atan2(sin(delta), cos(delta))
+
+
 def classify_pose(world_landmarks: Sequence, was_pinching: bool = False, *,
                   image_landmarks: Sequence | None = None, aspect: float = 1.0) -> Pose:
     """Use palm-relative distances so left/right hands and scale behave alike."""
@@ -65,7 +98,8 @@ def classify_pose(world_landmarks: Sequence, was_pinching: bool = False, *,
     if palm_width < 1e-8:
         return Pose("Tracking")
     extended = [_straight(points, *finger) for finger in
-                ((5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20))]
+                ((5, 6, 8), (9, 10, 12), (13, 14, 16))]
+    extended.append(pinky_extended(points))
     pinch_ratio = dist(_xyz(points[4]), _xyz(points[8])) / palm_width
     if was_pinching and image_landmarks is not None and pinch_ratio < 1.05:
         wrist, thumb, index, tip, middle, pinky = (image_landmarks[i] for i in (0, 4, 5, 8, 9, 17))
