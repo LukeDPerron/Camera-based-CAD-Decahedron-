@@ -6,6 +6,7 @@
 # UI: shared dependencies and camera discovery
 customtkinter==5.2.2
 cv2-enumerate-cameras==1.4.0
+pyglet>=2.1,<3
 # Native macOS camera names and hot-plug discovery (pulled in by the enumerator).
 pyobjc-framework-AVFoundation==12.0; platform_system == "Darwin"
 
