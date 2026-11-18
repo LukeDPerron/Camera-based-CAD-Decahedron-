@@ -217,6 +217,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Local models and MediaPipe assets
+hand_landmarker.task
+models/
+.pptx_preview/
+model.glb
+model.gltf
+
 tmp/
 cdx.sh
 create_user.sh
