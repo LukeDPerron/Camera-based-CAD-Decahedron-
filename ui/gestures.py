@@ -5,9 +5,6 @@ reference CSV collection script is collecting training data for.
 """
 
 from dataclasses import dataclass
-<<<<<<< HEAD
-from math import dist
-=======
 from math import atan2, cos, dist, hypot, pi, sin
 >>>>>>> milesBranch
 from typing import Sequence
@@ -136,17 +133,6 @@ def classify_pose(world_landmarks: Sequence, was_pinching: bool = False, *,
     if all(extended):
         return Pose("Palm")
     if extended == [True, False, False, False]:
-<<<<<<< HEAD
-        base = _xyz(points[5])
-        tip = _xyz(points[8])
-        length = dist(base, tip)
-        # MediaPipe's camera-aligned axes have positive Y down and positive Z
-        # away from the camera. Horizontal mirroring leaves both tests intact.
-        if base[2] - tip[2] >= 0.70 * length:
-            return Pose("Cursor")
-        if base[1] - tip[1] >= 0.70 * length:
-            return Pose("Point up")
-=======
         base, tip = _xyz(points[5]), _xyz(points[8])
         length = dist(base, tip)
         if base[1] - tip[1] >= 0.70 * length:

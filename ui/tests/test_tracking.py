@@ -12,11 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 from test_gestures import hand_points
 from tracking import CameraWorker, ViewOptions, open_camera
 
 
 =======
+=======
+>>>>>>> d491729e90aeefba9e282afc076d756ac96f8e55
 from gestures import SixSevenMotion, classify_pose, palm_pitch, palm_roll, palm_yaw
 from tracking import CameraWorker, ViewOptions, open_camera
 
@@ -139,7 +142,10 @@ class PoseTests(unittest.TestCase):
         self.assertEqual(classify_pose([Point(x=0, y=0, z=0)] * 21).name, "Tracking")
 
 
+<<<<<<< HEAD
 >>>>>>> milesBranch
+=======
+>>>>>>> d491729e90aeefba9e282afc076d756ac96f8e55
 class CameraTests(unittest.TestCase):
     def test_native_backends_fall_back_and_release_failed_capture(self):
         import cv2
