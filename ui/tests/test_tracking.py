@@ -1,4 +1,4 @@
-"""Hardware-independent checks for poses, bounded frames, and resource cleanup."""
+"""Hardware-independent checks for bounded frames, and resource cleanup."""
 
 from pathlib import Path
 from queue import Empty
