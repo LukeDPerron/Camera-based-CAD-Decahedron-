@@ -40,7 +40,12 @@ class Cube(SceneObject):
             (4, 5), (5, 7), (7, 6), (6, 4),
             (0, 4), (1, 5), (2, 6), (3, 7),
         ]
-        return {"kind": "wire", "local_points": corners, "edges": edges}
+        faces = [
+            (0, 1, 3, 2), (4, 6, 7, 5),
+            (0, 4, 5, 1), (2, 3, 7, 6),
+            (0, 2, 6, 4), (1, 5, 7, 3),
+        ]
+        return {"kind": "wire", "local_points": corners, "edges": edges, "faces": faces}
 
 
 class Sphere(SceneObject):

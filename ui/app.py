@@ -1,4 +1,4 @@
-"""CustomTkinter camera canvas. Run: python app.py"""
+"""CustomTkinter camera canvas. Run: python ui/app.py"""
 
 import sys
 import platform
@@ -17,6 +17,7 @@ if (platform.system() == "Darwin" and platform.machine() == "x86_64"
     )
 
 import tkinter as tk
+from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Thread
 import time
@@ -27,6 +28,14 @@ from PIL import Image, ImageDraw, ImageOps, ImageTk
 from tracking import CameraWorker, Frame, ViewOptions
 from cameras import CameraDevice, discover_cameras
 from dwell import DwellSelector
+from scene_overlay import draw_scene
+from shape_interaction import ShapeInteraction
+
+# Direct script launches put ui/, rather than the repository root, on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.command_handler import CommandHandler
+from src.gesture_event import GestureEvent, GestureType, ShapeType
+from src.scene import Scene
 
 
 BG = "#10151C"
@@ -51,9 +60,13 @@ class CameraCanvasApp(ctk.CTk):
         self.closing = False
         self.live = False
         self.dwell = DwellSelector()
+        self.quit_dwell = DwellSelector(duration=0.85)
         self.tip = None
         self.tip_seen = None
         self.shape_count = 0
+        self.scene = Scene()
+        self.shape_commands = CommandHandler(self.scene)
+        self.interaction = ShapeInteraction()
         self.shape_message = ""
         self.shape_message_until = 0.0
         self.camera_name = tk.StringVar(value="Finding cameras…")
@@ -105,6 +118,7 @@ class CameraCanvasApp(ctk.CTk):
         viewport.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
         self.viewport = viewport
         self.canvas = tk.Canvas(viewport, bg=CANVAS, highlightthickness=0, bd=0)
+        self.canvas.bind("<Button-1>", self._click_shape)
         self.canvas.pack(fill="both", expand=True, padx=12, pady=12)
         self.image_item = self.canvas.create_image(0, 0, anchor="center")
         self.message_item = self.canvas.create_text(
@@ -155,39 +169,47 @@ class CameraCanvasApp(ctk.CTk):
             height=38, font=ctk.CTkFont(size=13, weight="bold"), state="disabled",
         )
         self.camera_button.grid(row=2, column=0, sticky="ew", padx=20, pady=(14, 0))
-        self.scene_button = ctk.CTkButton(
-            sidebar, text="Open 3D scene", command=self._open_3d_scene,
-            fg_color="#344353", hover_color="#46596C", text_color=TEXT,
-            height=38, font=ctk.CTkFont(size=13, weight="bold"),
+        self._section(sidebar, "GESTURE MODE", 3)
+        self.mode_switch = ctk.CTkSegmentedButton(
+            sidebar, values=["Legacy", "Updated"], command=self._set_gesture_mode,
+            fg_color=BG, selected_color="#166B59", selected_hover_color="#1C806C",
+            unselected_color="#344353", unselected_hover_color="#46596C",
+            text_color=TEXT, font=ctk.CTkFont(size=13, weight="bold"),
         )
-        self.scene_button.grid(row=2, column=0, sticky="ew", padx=20, pady=(58, 0))
-        self._section(sidebar, "VIEW", 3)
+        self.mode_switch.grid(row=4, column=0, sticky="ew", padx=20)
+        self.mode_switch.set(self.interaction.mode)
+        self.mode_help = ctk.CTkLabel(
+            sidebar, justify="left", anchor="w", text_color=TEXT, wraplength=190,
+            font=ctk.CTkFont(size=12),
+        )
+        self.mode_help.grid(row=5, column=0, sticky="ew", padx=20, pady=(8, 0))
+        self._set_gesture_mode(self.interaction.mode)
+        self._section(sidebar, "VIEW", 6)
         for row, (label, variable) in enumerate(
             (("Mirror camera", self.mirror), ("Hand landmarks", self.landmarks),
-             ("Fingertip cursor", self.cursor)), start=4
+             ("Fingertip cursor", self.cursor)), start=7
         ):
             ctk.CTkSwitch(
                 sidebar, text=label, variable=variable, command=self._update_options,
                 progress_color=ACCENT, button_color=TEXT, text_color=TEXT,
                 font=ctk.CTkFont(size=13), switch_width=36, switch_height=20,
             ).grid(row=row, column=0, sticky="w", padx=20, pady=(0, 14))
-        self._section(sidebar, "TRACKING", 7, top=10)
+        self._section(sidebar, "TRACKING", 10, top=10)
         telemetry = ctk.CTkFrame(sidebar, fg_color=BG, corner_radius=10)
-        telemetry.grid(row=8, column=0, sticky="ew", padx=16)
+        telemetry.grid(row=11, column=0, sticky="ew", padx=16, pady=(0, 16))
         self.hand_value = self._metric(telemetry, "Hand", "No hand", 0)
         self.pose_value = self._metric(telemetry, "Pose", "—", 1)
         self.fps_value = self._metric(telemetry, "FPS", "—", 2)
         self.position_value = self._metric(telemetry, "Tip X / Y", "—", 3)
-        ctk.CTkLabel(
-            sidebar, text="Raise one hand to begin.\nMove your index finger to aim.\nPinch to light up the cursor.",
-            justify="left", anchor="w", text_color=TEXT,
-            font=ctk.CTkFont(size=12), wraplength=200,
-        ).grid(row=9, column=0, sticky="ew", padx=20, pady=(20, 8))
-        ctk.CTkLabel(
-            sidebar, text="Pose previews: pinch, point,\nopen palm, fist.\nBasic rules · not custom trained.",
-            justify="left", anchor="w", text_color=MUTED,
-            font=ctk.CTkFont(size=11), wraplength=200,
-        ).grid(row=10, column=0, sticky="ew", padx=20, pady=(0, 18))
+
+    def _set_gesture_mode(self, mode):
+        self.interaction.mode = mode
+        self.interaction.reset_motion()
+        if mode == "Legacy":
+            help_text = "Pinch to select. Thumb out moves X, point up moves Y, and sweeping an open palm up or down moves Z."
+        else:
+            help_text = "Pinch and hold to grab. Move across the frame or toward and away from the camera. Release to drop."
+        self.mode_help.configure(text=help_text)
 
     def _toggle_sidebar(self):
         self.sidebar_visible = not self.sidebar_visible
@@ -221,20 +243,6 @@ class CameraCanvasApp(ctk.CTk):
         self._reset_dwell()
         if self.worker:
             self.worker.set_options(self._view_options())
-
-    def _open_3d_scene(self):
-        if not hasattr(self, "scene"):
-            from src.scene import Scene
-            self.scene = Scene()
-        if hasattr(self, "_scene_thread") and self._scene_thread.is_alive():
-            return
-
-        def open_window():
-            from src.pyglet_viewer import run
-            run(self.scene)
-
-        self._scene_thread = Thread(target=open_window, daemon=True)
-        self._scene_thread.start()
 
     def refresh_cameras(self, auto_start=False):
         if self.closing or self.camera_scan or self.worker:
@@ -327,6 +335,7 @@ class CameraCanvasApp(ctk.CTk):
 
     def _empty_canvas(self, message):
         self._reset_dwell()
+        self.quit_dwell.reset()
         self.last_image = None
         self.canvas.itemconfigure(self.image_item, image="")
         self.photo = None
@@ -350,6 +359,7 @@ class CameraCanvasApp(ctk.CTk):
             return
         size = (max(1, self.canvas.winfo_width()), max(1, self.canvas.winfo_height()))
         fitted = ImageOps.contain(self.last_image, size, Image.Resampling.BILINEAR)
+        draw_scene(fitted, self.scene.objects, self.interaction.selected)
         self.photo = ImageTk.PhotoImage(fitted, master=self.canvas)
         self.canvas.itemconfigure(self.image_item, image=self.photo)
         self.canvas.itemconfigure(self.message_item, state="hidden")
@@ -357,6 +367,7 @@ class CameraCanvasApp(ctk.CTk):
 
     def _reset_dwell(self):
         self.dwell.reset()
+        self.interaction.reset_motion()
         self.tip = None
         self.tip_seen = None
 
@@ -382,34 +393,30 @@ class CameraCanvasApp(ctk.CTk):
             tip = (left + self.tip[0] * fw, top + self.tip[1] * fh)
         return buttons, tip
 
-    def _update_shape_hover(self, now):
-        buttons, tip = self._shape_layout()
-        target = None
-        if tip is not None:
+    @staticmethod
+    def _shape_at(buttons, position):
+        if position is not None:
+            x, y = position
             for name, (x1, y1, x2, y2) in buttons:
-                if x1 <= tip[0] <= x2 and y1 <= tip[1] <= y2:
-                    target = name
-                    break
-        selected = self.dwell.update(target, now)
-        if selected is not None:
-            self._select_shape(selected)
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    return name
+        return None
+
+    def _click_shape(self, event):
+        buttons, _ = self._shape_layout()
+        target = self._shape_at(buttons, (event.x, event.y))
+        if target is not None:
+            self._select_shape(target)
+            self._render_image()
 
     def _select_shape(self, shape):
         """Create the corresponding object in the shared backend scene."""
-        from src.gesture_event import ShapeType
-        from src.shape_factory import ShapeFactory
-
-        shape_type = {
-            "Cube": ShapeType.CUBE,
-            "Sphere": ShapeType.SPHERE,
-            "Pyramid": ShapeType.PYRAMID,
-        }.get(shape)
-        if shape_type is None:
-            return
-        if not hasattr(self, "scene"):
-            from src.scene import Scene
-            self.scene = Scene()
-        self.scene.add(ShapeFactory.create(shape_type))
+        # Start at the center, then fill neighboring positions in camera space.
+        row, column = divmod(len(self.scene.objects) % 9, 3)
+        offsets = (0.0, -1.1, 1.1)
+        position = (offsets[column], offsets[row], 4.0)
+        event = GestureEvent(GestureType.CREATE_SHAPE, 1.0, shape_type=ShapeType[shape.upper()])
+        self.shape_commands.handle(event, spawn_position=position)
         self.shape_count += 1
         self.shape_message = f"{shape} selected · action {self.shape_count}"
         self.shape_message_until = time.monotonic() + 2.0
@@ -463,9 +470,21 @@ class CameraCanvasApp(ctk.CTk):
             self.status.configure(text="●  Live", text_color=ACCENT)
         self.last_image = Image.fromarray(frame.rgb)
         now = time.monotonic()
+        quit_target = frame.hand if frame.cursor is not None and frame.gesture == "Middle finger" else None
+        if self.quit_dwell.update(quit_target, now) is not None:
+            self.close()
+            return
         self.tip = frame.cursor
         self.tip_seen = now if frame.cursor is not None else None
-        self._update_shape_hover(now)
+        buttons, tip = self._shape_layout()
+        toolbar_target = self._shape_at(buttons, tip)
+        self.interaction.update(frame, self.scene.objects, self.last_image.size,
+                                now, over_toolbar=toolbar_target is not None)
+        if self.interaction.pinching or self.interaction.anchor is not None or quit_target is not None:
+            toolbar_target = None
+        selected_shape = self.dwell.update(toolbar_target, now)
+        if selected_shape is not None:
+            self._select_shape(selected_shape)
         self._render_image()
         self.hand_value.configure(text=frame.hand)
         self.pose_value.configure(text=frame.gesture)
@@ -483,7 +502,8 @@ class CameraCanvasApp(ctk.CTk):
             self.shape_message = ""
             self._draw_shape_toolbar()
         if self.tip_seen is not None and time.monotonic() - self.tip_seen > self.dwell.max_gap:
-            self._reset_dwell()
+            self.dwell.reset()
+            self.tip = self.tip_seen = None
             self._draw_shape_toolbar()
         worker = self.worker
         if worker:
@@ -504,6 +524,8 @@ class CameraCanvasApp(ctk.CTk):
             if not self.error and not worker.stop_event.is_set():
                 try:
                     self._display_frame(worker.frames.get_nowait())
+                    if self.closing:
+                        return
                 except Empty:
                     pass
             if ended:

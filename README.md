@@ -31,11 +31,20 @@ The CustomTkinter UI is located in `ui/`. Run it with:
 python ui/app.py
 ```
 
-The UI branch provides the camera canvas, tracking helpers, gesture dwell handling, and UI tests. The backend event contract remains independent of the UI implementation.
+Click a Cube, Sphere, or Pyramid icon at the bottom of the live camera feed, or hold your index fingertip over it for one second. Shapes appear directly over the video. Their positions are relative to the camera view, so they stay in the same part of the frame when you move the camera.
+
+Aim at a shape and pinch to select it. The selected shape gets an amber outline.
+
+- **Updated** is the default. Hold the pinch and move your hand across the image or toward and away from the lens. Release to drop the shape. Depth is estimated from apparent palm size, so keeping your hand at a steady angle helps.
+- **Legacy** keeps the selection when you release the pinch. Pinch again to deselect. Extend your thumb from a fist and move left or right for X. Point your index finger up and move vertically for Y. With an open palm, sweep up to move the shape farther away or down to bring it closer on Z.
+
+Hold up only your middle finger for about a second to close the app.
+
+In either mode, twist your pinched hand clockwise or counterclockwise to rotate the shape around the grab point.
 
 ## 3D scene
 
-Open the Pyglet 3D scene from the CustomTkinter UI with **Open 3D scene**, or run it directly:
+Run the standalone Pyglet scene demo with:
 
 ```text
 python -m src.pyglet_viewer

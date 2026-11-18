@@ -29,6 +29,17 @@ def hand_points(extended=(True, True, True, True)):
 
 
 class PoseTests(unittest.TestCase):
+    def test_middle_finger_alone(self):
+        points = hand_points((False, True, False, False))
+        points[4] = points[8]
+        self.assertEqual(classify_pose(points).name, "Middle finger")
+
+    def test_legacy_direction_poses(self):
+        points = hand_points((True, False, False, False))
+        self.assertEqual(classify_pose([Point(x=p.x, y=-p.y, z=p.z)
+                                        for p in points]).name, "Point up")
+        self.assertEqual(classify_pose(hand_points((False,) * 4)).name, "Thumb out")
+
     def test_open_palm(self):
         self.assertEqual(classify_pose(hand_points()).name, "Open palm")
 

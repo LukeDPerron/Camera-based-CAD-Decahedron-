@@ -1,5 +1,4 @@
 import math
-import threading
 
 import numpy as np
 import pyglet
@@ -45,7 +44,7 @@ def _sphere_vertices(radius, slices=16, stacks=10):
         phi1 = math.pi * (i + 1) / stacks
         for j in range(slices):
             theta0 = 2.0 * math.pi * j / slices
-            theta1 = 2.0 * math.pi * (j + 1) % slices
+            theta1 = 2.0 * math.pi * (j + 1) / slices
 
             def point(phi, theta):
                 return (
@@ -133,13 +132,13 @@ class PygletSceneWindow(pyglet.window.Window):
         self.camera_pitch = 25.0
         self.camera_distance = 8.0
         self.camera_target = np.array([0.0, 0.0, 0.0], dtype=float)
-        self.lock = threading.RLock()
         vertex_shader = Shader(VERTEX_SHADER, "vertex")
         fragment_shader = Shader(FRAGMENT_SHADER, "fragment")
         self.program = ShaderProgram(vertex_shader, fragment_shader)
         self.shader_group = ShaderGroup(self.program)
 
         pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
+
     def _camera(self):
         yaw = math.radians(self.camera_yaw)
         pitch = math.radians(self.camera_pitch)
@@ -174,34 +173,37 @@ class PygletSceneWindow(pyglet.window.Window):
             local = _cylinder_vertices(obj.transform.scale)
         else:
             return np.empty((0, 3), dtype=np.float32)
-        return local + obj.transform.position.astype(np.float32)
+        return local.reshape(-1, 3) + obj.transform.position.astype(np.float32)
 
     def on_draw(self):
         self.clear()
         projection, view = self._camera()
         batch = Batch()
-        with self.lock:
-            objects = list(self.scene.objects)
+        meshes = []
+        try:
+            for obj in self.scene.objects:
+                vertices = self._vertices_for(obj)
+                if len(vertices) == 0:
+                    continue
+                triangles = vertices.reshape(-1, 3, 3)
+                normals = np.cross(triangles[:, 1] - triangles[:, 0],
+                                   triangles[:, 2] - triangles[:, 0])
+                lengths = np.maximum(np.linalg.norm(normals, axis=1), 1e-8)
+                light = np.abs(normals @ np.array([0.36, 0.48, 0.8])) / lengths
+                shades = np.repeat(0.4 + 0.6 * light, 3)
+                colors = shades[:, None] * (np.asarray(obj.color) / 255.0)
+                meshes.append(self.program.vertex_list(
+                    len(vertices), GL_TRIANGLES, batch=batch, group=self.shader_group,
+                    position=("f", vertices.ravel()), color=("f", colors.ravel()),
+                ))
 
-        for obj in objects:
-            vertices = self._vertices_for(obj)
-            if len(vertices) == 0:
-                continue
-            color = tuple(channel / 255.0 for channel in obj.color)
-            vertex_count = len(vertices)
-            colors = np.tile(np.asarray(color, dtype=np.float32), (vertex_count, 1)).reshape(-1)
-            batch.add(
-                vertex_count,
-                GL_TRIANGLES,
-                self.shader_group,
-                ("position3f", tuple(float(value) for value in vertices.reshape(-1))),
-                ("color3f", tuple(float(value) for value in colors)),
-            )
-
-        pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
-        self.program["projection"] = projection
-        self.program["view"] = view
-        batch.draw()
+            pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
+            self.program["projection"] = projection
+            self.program["view"] = view
+            batch.draw()
+        finally:
+            for mesh in meshes:
+                mesh.delete()
 
     def on_key_press(self, symbol, modifiers):
         if symbol == key._1:

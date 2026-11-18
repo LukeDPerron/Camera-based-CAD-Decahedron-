@@ -9,6 +9,7 @@ from pathlib import Path
 from queue import Empty, Full, Queue, SimpleQueue
 from threading import Event, Lock, Thread
 import platform
+from math import atan2, hypot
 import time
 import urllib.request
 
@@ -50,6 +51,10 @@ class Frame:
     gesture: str
     cursor: tuple[float, float] | None
     fps: float
+    pinching: bool = False
+    palm: tuple[float, float] | None = None
+    palm_scale: float | None = None
+    palm_roll: float | None = None
 
 
 def ensure_model() -> Path:
@@ -165,6 +170,7 @@ class CameraWorker(Thread):
             fps = 0.0
             stable_pose = pending_pose = "Tracking"
             pose_frames = 0
+            pinching = False
             while not self.stop_event.is_set():
                 ok, bgr = cap.read()
                 if not ok or bgr is None:
@@ -187,29 +193,47 @@ class CameraWorker(Thread):
                     mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp
                 )
                 hand, gesture, cursor = "No hand", "—", None
+                palm = palm_scale = palm_roll = None
                 if result.hand_landmarks:
                     landmarks = result.hand_landmarks[0]
-                    pose = classify_pose(result.hand_world_landmarks[0])
+                    pose = classify_pose(result.hand_world_landmarks[0], pinching)
+                    pinching = pose.pinching
                     pose_frames = pose_frames + 1 if pending_pose == pose.name else 1
                     pending_pose = pose.name
                     if pose_frames >= 3:
                         stable_pose = pending_pose
                     gesture = stable_pose
+                    if gesture == "Middle finger" and pose.name != gesture:
+                        gesture = pose.name
                     hand = result.handedness[0][0].category_name
                     # The Tasks model predicts handedness on unmirrored input.
                     # Mirroring the input reverses its Left/Right prediction.
                     if options.mirror:
                         hand = "Left" if hand == "Right" else "Right"
                     cursor = (landmarks[8].x, landmarks[8].y)
+                    wrist, index, middle, pinky = (landmarks[i] for i in (0, 5, 9, 17))
+                    palm = ((wrist.x + middle.x) / 2, (wrist.y + middle.y) / 2)
+                    aspect = rgb.shape[1] / rgb.shape[0]
+                    palm_dx = (middle.x - wrist.x) * aspect
+                    palm_dy = wrist.y - middle.y
+                    palm_length = hypot(palm_dx, palm_dy)
+                    palm_scale = (
+                        hypot((index.x - pinky.x) * aspect, index.y - pinky.y)
+                        + palm_length
+                    ) / 2
+                    if palm_length > 0.35 * palm_scale:
+                        palm_roll = atan2(palm_dy, palm_dx)
                     draw_overlay(rgb, landmarks, options, pose.pinching)
                 else:
+                    pinching = False
                     stable_pose = pending_pose = "Tracking"
                     pose_frames = 0
                 now = time.monotonic()
                 measured = 1 / max(now - previous, 1e-6)
                 fps = measured if not fps else 0.9 * fps + 0.1 * measured
                 previous = now
-                packet = Frame(rgb, hand, gesture, cursor, fps)
+                packet = Frame(rgb, hand, gesture, cursor, fps, pinching, palm, palm_scale,
+                               palm_roll)
                 # Keep only the newest frame so inference never queues behind Tk.
                 try:
                     self.frames.get_nowait()

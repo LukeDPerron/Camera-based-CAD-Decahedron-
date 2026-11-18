@@ -5,7 +5,7 @@ reference CSV collection script is collecting training data for.
 """
 
 from dataclasses import dataclass
-from math import acos, degrees, dist
+from math import dist
 from typing import Sequence
 
 
@@ -27,12 +27,10 @@ def _straight(points, base: int, joint: int, tip: int) -> bool:
     if magnitude < 1e-10:
         return False
     cosine = sum(x * y for x, y in zip(v, w)) / magnitude
-    angle = degrees(acos(max(-1.0, min(1.0, cosine))))
-    wrist = _xyz(points[0])
-    return angle > 155 and dist(c, wrist) > dist(b, wrist) * 1.1
+    return cosine < -0.5 and dist(a, c) >= 0.85 * (dist(a, b) + dist(b, c))
 
 
-def classify_pose(world_landmarks: Sequence) -> Pose:
+def classify_pose(world_landmarks: Sequence, was_pinching: bool = False) -> Pose:
     """Use palm-relative distances so left/right hands and scale behave alike."""
     if len(world_landmarks) != 21:
         return Pose("Tracking")
@@ -40,18 +38,24 @@ def classify_pose(world_landmarks: Sequence) -> Pose:
     palm_width = dist(_xyz(points[5]), _xyz(points[17]))
     if palm_width < 1e-8:
         return Pose("Tracking")
-    pinch_ratio = dist(_xyz(points[4]), _xyz(points[8])) / palm_width
-    if pinch_ratio < 0.38:
-        return Pose("Pinch", pinching=True)
     extended = [_straight(points, *finger) for finger in
                 ((5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20))]
+    if extended == [False, True, False, False]:
+        return Pose("Middle finger")
+    pinch_ratio = dist(_xyz(points[4]), _xyz(points[8])) / palm_width
+    if pinch_ratio < (0.55 if was_pinching else 0.42):
+        return Pose("Pinch", pinching=True)
     if all(extended):
         return Pose("Open palm")
     if extended == [True, False, False, False]:
+        base, tip = _xyz(points[5]), _xyz(points[8])
+        length = dist(base, tip)
+        if base[1] - tip[1] >= 0.70 * length:
+            return Pose("Point up")
+        if base[2] - tip[2] >= 0.70 * length:
+            return Pose("Cursor")
         return Pose("Point")
     if not any(extended):
-        # A sideways extended thumb should not be described as a fist.
         thumb_out = dist(_xyz(points[4]), _xyz(points[17])) / palm_width
-        if thumb_out < 1.6:
-            return Pose("Fist")
+        return Pose("Thumb out" if thumb_out >= 1.6 else "Fist")
     return Pose("Tracking")

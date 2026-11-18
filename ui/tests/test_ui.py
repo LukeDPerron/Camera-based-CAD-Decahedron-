@@ -64,6 +64,11 @@ class UiTests(unittest.TestCase):
         from tracking import Frame
         self.app._display_frame(Frame(np.zeros((360, 640, 3), dtype=np.uint8),
                                       "Right", "Point", None, 30))
+        def photo_pixel(x, y):
+            return self.app.tk.call(str(self.app.photo), "get", x, y)
+
+        center = (self.app.photo.width() // 2, self.app.photo.height() // 2)
+        self.assertEqual(photo_pixel(*center), (0, 0, 0))
         buttons, _ = self.app._shape_layout()
         _, (x1, y1, x2, y2) = buttons[0]
         width, height = self.app.canvas.winfo_width(), self.app.canvas.winfo_height()
@@ -76,11 +81,148 @@ class UiTests(unittest.TestCase):
             with patch("app.time.monotonic", return_value=now):
                 self.app._display_frame(frame)
         self.assertEqual(self.app.shape_count, 1)
+        self.assertEqual([obj.shape_type.name for obj in self.app.scene.objects], ["CUBE"])
+        self.assertGreater(max(photo_pixel(*center)), 0)
         self.assertIn("Cube selected", self.app.shape_message)
         self.assertTrue(self.app.canvas.find_withtag("shape_toolbar"))
+        for _, (x1, y1, x2, y2) in buttons[1:]:
+            self.app.canvas.event_generate("<Button-1>", x=int((x1 + x2) / 2),
+                                           y=int((y1 + y2) / 2))
+        self.assertEqual([obj.shape_type.name for obj in self.app.scene.objects],
+                         ["CUBE", "SPHERE", "PYRAMID"])
+        self.assertEqual(len({tuple(obj.transform.position) for obj in self.app.scene.objects}), 3)
+        fitted_height = self.app.photo.height()
+        for x_offset in (-1.1, 1.1):
+            self.assertGreater(max(photo_pixel(int(center[0] + fitted_height * x_offset / 4),
+                                               center[1])), 0)
+        self.assertEqual(self.app.last_image.getpixel((320, 180)), (0, 0, 0))
         self.app._empty_canvas("Camera stopped")
         self.assertIsNone(self.app.dwell.target)
         self.assertFalse(self.app.canvas.find_withtag("shape_toolbar"))
+
+    def test_pinch_selects_and_modes_move_the_object(self):
+        import numpy as np
+        from tracking import Frame
+
+        self.app._select_shape("Cube")
+        obj = self.app.scene.objects[0]
+        rgb = np.zeros((360, 640, 3), dtype=np.uint8)
+        now = 0
+
+        def send(cursor, pose="Tracking", pinching=False, scale=.1):
+            nonlocal now
+            now += .05
+            with patch("app.time.monotonic", return_value=now):
+                self.app._display_frame(Frame(rgb, "Right", pose, cursor, 30,
+                                              pinching, cursor, scale))
+
+        self.assertEqual(self.app.mode_switch.get(), "Updated")
+        send((.5, .5), pinching=True)
+        self.assertIs(self.app.interaction.selected, obj)
+        send((.6, .4), pinching=True, scale=.15)
+        x, y, z = obj.transform.position
+        self.assertGreater(x, 0)
+        self.assertGreater(y, 0)
+        self.assertLess(z, 4)
+        send((.8, .3))
+        np.testing.assert_allclose(obj.transform.position, (x, y, z))
+
+        self.app.mode_switch.set("Legacy")
+        self.app._set_gesture_mode("Legacy")
+        obj.transform.position[:] = (0, 0, 4)
+        send((.5, .5), pinching=True)
+        self.assertIsNone(self.app.interaction.selected)
+        now += .25
+        send((.5, .5))
+        send((.5, .5), pinching=True)
+        self.assertIs(self.app.interaction.selected, obj)
+        now += .25
+        send((.5, .5), "Thumb out")
+        send((.6, .4), "Thumb out")
+        x = obj.transform.position[0]
+        self.assertGreater(x, 0)
+        np.testing.assert_allclose(obj.transform.position[1:], (0, 4))
+        send((.6, .5), "Point up")
+        send((.7, .4), "Point up")
+        y = obj.transform.position[1]
+        self.assertGreater(y, 0)
+        send((.6, .5), "Open palm")
+        send((.7, .4), "Open palm")
+        expected = (x, y, 4 * np.exp(.4))
+        np.testing.assert_allclose(obj.transform.position, expected)
+        send(None, "—")
+        send((.9, .9), "Open palm")
+        np.testing.assert_allclose(obj.transform.position, expected)
+        send((.9, .9), pinching=True)
+        self.assertIsNone(self.app.interaction.selected)
+
+    def test_updated_grab_survives_dropouts_and_passes_old_depth_limits(self):
+        import numpy as np
+        from tracking import Frame
+
+        self.app._select_shape("Cube")
+        obj = self.app.scene.objects[0]
+        rgb = np.zeros((360, 640, 3), dtype=np.uint8)
+        now = 0
+
+        def send(cursor, pinching, scale=.1):
+            nonlocal now
+            now += .1
+            with patch("app.time.monotonic", return_value=now):
+                self.app._display_frame(Frame(rgb, "Right", "Tracking", cursor, 30,
+                                              pinching, cursor, scale))
+
+        send((.5, .5), True)
+        send((.6, .5), False)
+        send((.65, .5), True)
+        self.assertIs(self.app.interaction.selected, obj)
+        self.assertGreater(obj.transform.position[0], 0)
+        send(None, False)
+        send(None, False)
+        send(None, False)
+        send((.65, .5), True)
+        for _ in range(12):
+            send((.65, .5), True, scale=.01)
+        self.assertGreater(obj.transform.position[2], 12)
+        for _ in range(12):
+            send((.65, .5), True, scale=.5)
+        self.assertLess(obj.transform.position[2], 1.4)
+        self.assertGreater(obj.transform.position[2], 0)
+
+    def test_pinch_roll_rotates_around_an_off_center_grab(self):
+        from math import pi
+        import numpy as np
+        from tracking import Frame
+
+        self.app._select_shape("Cube")
+        obj = self.app.scene.objects[0]
+        rgb = np.zeros((360, 640, 3), dtype=np.uint8)
+        tip = (.52, .5)
+        for now, roll in ((0, 0), (.1, pi / 2)):
+            with patch("app.time.monotonic", return_value=now):
+                self.app._display_frame(Frame(rgb, "Right", "Pinch", tip, 30,
+                                              True, tip, .1, roll))
+        self.assertIs(self.app.interaction.selected, obj)
+        pivot = 4 * (.52 - .5) * 640 / 360
+        np.testing.assert_allclose(obj.transform.position, (pivot, -pivot, 4))
+        self.assertAlmostEqual(obj.transform.rotation[2], pi / 2)
+
+    def test_middle_finger_has_to_be_held_to_quit(self):
+        import numpy as np
+        from tracking import Frame
+
+        rgb = np.zeros((360, 640, 3), dtype=np.uint8)
+        gesture = Frame(rgb, "Right", "Middle finger", (.5, .5), 30)
+        other = Frame(rgb, "Right", "Tracking", (.5, .5), 30)
+        with patch.object(self.app, "close") as close:
+            for now, frame in ((0, gesture), (.3, gesture), (.4, other), (.6, gesture),
+                               (.8, gesture), (1.0, gesture), (1.2, gesture), (1.4, gesture)):
+                with patch("app.time.monotonic", return_value=now):
+                    self.app._display_frame(frame)
+            close.assert_not_called()
+            with patch("app.time.monotonic", return_value=1.5):
+                self.app._display_frame(gesture)
+            close.assert_called_once()
 
     def test_stopped_worker_preserves_error_and_enables_retry(self):
         worker = MagicMock()
