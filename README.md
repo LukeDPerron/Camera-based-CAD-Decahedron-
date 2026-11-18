@@ -42,6 +42,10 @@ Hold up only your middle finger for about a second to close the app.
 
 In either mode, twist your pinched hand clockwise or counterclockwise to rotate the shape around the grab point.
 
+Pinch with your pinky extended to add or remove the shape you are pointing at. Movement and rotation apply to every selected shape. In Legacy mode, twisting an open palm also rotates the selection. To delete the selection in either mode, show an open palm and then make a fist within one second.
+
+Show both hands and bounce them in opposite directions, one up while the other goes down. After two reversals, **6** and **7** follow your hands while the motion continues. Touch your thumb, middle finger, and ring finger together while extending your index finger and pinky to show the cat. Deleting a shape plays a fading explosion at its position.
+
 ## 3D scene
 
 Run the standalone Pyglet scene demo with:

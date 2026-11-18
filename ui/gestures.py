@@ -5,7 +5,7 @@ reference CSV collection script is collecting training data for.
 """
 
 from dataclasses import dataclass
-from math import dist
+from math import atan2, cos, dist, hypot, pi, sin
 from typing import Sequence
 
 
@@ -13,6 +13,7 @@ from typing import Sequence
 class Pose:
     name: str
     pinching: bool = False
+    pinky_up: bool = False
 
 
 def _xyz(point):
@@ -30,7 +31,32 @@ def _straight(points, base: int, joint: int, tip: int) -> bool:
     return cosine < -0.5 and dist(a, c) >= 0.85 * (dist(a, b) + dist(b, c))
 
 
-def classify_pose(world_landmarks: Sequence, was_pinching: bool = False) -> Pose:
+def palm_roll(image_landmarks: Sequence, aspect: float, previous: float | None) -> float | None:
+    """Estimate in-plane rotation from the wrist and four knuckles."""
+    wrist = image_landmarks[0]
+    knuckles = [image_landmarks[i] for i in (5, 9, 13, 17)]
+    dx = (sum(p.x for p in knuckles) / 4 - wrist.x) * aspect
+    dy = wrist.y - sum(p.y for p in knuckles) / 4
+    index, pinky = knuckles[0], knuckles[-1]
+    across_x = (pinky.x - index.x) * aspect
+    across_y = index.y - pinky.y
+    width = hypot(across_x, across_y)
+    if hypot(dx, dy) >= max(0.002, 0.45 * width):
+        angle = atan2(dy, dx)
+    elif previous is not None and width >= 0.002:
+        angle = atan2(across_y, across_x) + pi / 2
+        if cos(angle - previous) < 0:
+            angle += pi
+    else:
+        return previous
+    if previous is None:
+        return angle
+    delta = angle - previous
+    return previous + 0.55 * atan2(sin(delta), cos(delta))
+
+
+def classify_pose(world_landmarks: Sequence, was_pinching: bool = False, *,
+                  image_landmarks: Sequence | None = None, aspect: float = 1.0) -> Pose:
     """Use palm-relative distances so left/right hands and scale behave alike."""
     if len(world_landmarks) != 21:
         return Pose("Tracking")
@@ -40,11 +66,30 @@ def classify_pose(world_landmarks: Sequence, was_pinching: bool = False) -> Pose
         return Pose("Tracking")
     extended = [_straight(points, *finger) for finger in
                 ((5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20))]
+    pinch_ratio = dist(_xyz(points[4]), _xyz(points[8])) / palm_width
+    if was_pinching and image_landmarks is not None and pinch_ratio < 1.05:
+        wrist, thumb, index, tip, middle, pinky = (image_landmarks[i] for i in (0, 4, 5, 8, 9, 17))
+        span = max(hypot((index.x - pinky.x) * aspect, index.y - pinky.y),
+                   hypot((wrist.x - middle.x) * aspect, wrist.y - middle.y))
+        separation = hypot((thumb.x - tip.x) * aspect, thumb.y - tip.y)
+        # During a turn, depth estimates can split fingertips that are still
+        # together in the image. Use overlap only to sustain an existing grab.
+        if span > 0 and separation < 0.20 * span:
+            return Pose("Pinch", pinching=True, pinky_up=extended[3])
+    if extended == [True, False, False, True]:
+        tips = [_xyz(points[i]) for i in (4, 12, 16)]
+        if max(dist(tips[0], tips[1]), dist(tips[0], tips[2]),
+               dist(tips[1], tips[2])) < 0.38 * palm_width:
+            return Pose("Cat")
     if extended == [False, True, False, False]:
         return Pose("Middle finger")
-    pinch_ratio = dist(_xyz(points[4]), _xyz(points[8])) / palm_width
+    folded = not any(extended)
+    thumb_out = dist(_xyz(points[4]), _xyz(points[17])) / palm_width
+    index_reach = dist(_xyz(points[5]), _xyz(points[8])) / palm_width
+    if folded and thumb_out < 1.6 and index_reach < 0.40:
+        return Pose("Fist")
     if pinch_ratio < (0.55 if was_pinching else 0.42):
-        return Pose("Pinch", pinching=True)
+        return Pose("Pinch", pinching=True, pinky_up=extended[3])
     if all(extended):
         return Pose("Open palm")
     if extended == [True, False, False, False]:
@@ -55,7 +100,53 @@ def classify_pose(world_landmarks: Sequence, was_pinching: bool = False) -> Pose
         if base[2] - tip[2] >= 0.70 * length:
             return Pose("Cursor")
         return Pose("Point")
-    if not any(extended):
-        thumb_out = dist(_xyz(points[4]), _xyz(points[17])) / palm_width
+    if folded:
         return Pose("Thumb out" if thumb_out >= 1.6 else "Fist")
     return Pose("Tracking")
+
+
+class SixSevenMotion:
+    """Recognize alternating up and down strokes from two tracked palms."""
+
+    STROKE_HEIGHT = 0.045
+    MAX_SAMPLE_GAP = 0.25
+    MAX_STROKE_GAP = 0.65
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.anchor = None
+        self.last_sample = None
+        self.last_stroke = None
+        self.direction = 0
+        self.reversals = 0
+
+    def update(self, palms, now):
+        if set(palms) != {"Left", "Right"}:
+            self.reset()
+            return None
+        if self.last_sample is not None and now - self.last_sample > self.MAX_SAMPLE_GAP:
+            self.reset()
+        self.last_sample = now
+        left, right = palms["Left"], palms["Right"]
+        if (self.anchor is None or
+                (self.last_stroke is not None and now - self.last_stroke > self.MAX_STROKE_GAP)):
+            self.anchor = (left[1], right[1])
+            self.last_stroke = None
+            self.direction = self.reversals = 0
+            return None
+
+        dl, dr = left[1] - self.anchor[0], right[1] - self.anchor[1]
+        if min(abs(dl), abs(dr)) >= self.STROKE_HEIGHT:
+            if dl * dr < 0:
+                direction = 1 if dl > 0 else -1
+                if self.direction and self.direction != direction:
+                    self.reversals += 1
+                self.direction = direction
+                self.last_stroke = now
+            self.anchor = (left[1], right[1])
+
+        if self.reversals >= 2:
+            return (left, right) if left[0] <= right[0] else (right, left)
+        return None

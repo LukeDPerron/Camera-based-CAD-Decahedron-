@@ -9,7 +9,7 @@ from pathlib import Path
 from queue import Empty, Full, Queue, SimpleQueue
 from threading import Event, Lock, Thread
 import platform
-from math import atan2, hypot
+from math import hypot
 import time
 import urllib.request
 
@@ -19,7 +19,7 @@ import numpy as np
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 
-from gestures import classify_pose
+from gestures import SixSevenMotion, classify_pose, palm_roll as estimate_palm_roll
 from cameras import CameraDevice, resolve_camera
 
 
@@ -55,6 +55,10 @@ class Frame:
     palm: tuple[float, float] | None = None
     palm_scale: float | None = None
     palm_roll: float | None = None
+    pinky_up: bool = False
+    cat: tuple[float, float] | None = None
+    six_seven: tuple[tuple[float, float], tuple[float, float]] | None = None
+    hand_count: int = 0
 
 
 def ensure_model() -> Path:
@@ -103,7 +107,8 @@ def open_camera(index: int, backend: int | None = None):
     )
 
 
-def draw_overlay(rgb: np.ndarray, landmarks, options: ViewOptions, pinching: bool):
+def draw_overlay(rgb: np.ndarray, landmarks, options: ViewOptions, pinching: bool,
+                 cursor: tuple[float, float] | None):
     height, width = rgb.shape[:2]
     points = [(int(p.x * (width - 1)), int(p.y * (height - 1))) for p in landmarks]
     mint = (95, 230, 190)  # RGB, since this frame is already converted for Pillow.
@@ -112,10 +117,11 @@ def draw_overlay(rgb: np.ndarray, landmarks, options: ViewOptions, pinching: boo
             cv2.line(rgb, points[a], points[b], mint, 2, cv2.LINE_AA)
         for point in points:
             cv2.circle(rgb, point, 4, (235, 249, 245), -1, cv2.LINE_AA)
-    if options.cursor:
+    if options.cursor and cursor is not None:
         color = (255, 194, 102) if pinching else mint
-        cv2.circle(rgb, points[8], 17 if pinching else 12, color, 2, cv2.LINE_AA)
-        cv2.circle(rgb, points[8], 3, color, -1, cv2.LINE_AA)
+        aim = (int(cursor[0] * (width - 1)), int(cursor[1] * (height - 1)))
+        cv2.circle(rgb, aim, 17 if pinching else 12, color, 2, cv2.LINE_AA)
+        cv2.circle(rgb, aim, 3, color, -1, cv2.LINE_AA)
 
 
 class CameraWorker(Thread):
@@ -150,7 +156,7 @@ class CameraWorker(Thread):
                         delegate=mp_python.BaseOptions.Delegate.CPU,
                     ),
                     running_mode=vision.RunningMode.VIDEO,
-                    num_hands=1,
+                    num_hands=2,
                     min_hand_detection_confidence=0.6,
                     min_hand_presence_confidence=0.6,
                     min_tracking_confidence=0.5,
@@ -171,6 +177,10 @@ class CameraWorker(Thread):
             stable_pose = pending_pose = "Tracking"
             pose_frames = 0
             pinching = False
+            primary = None
+            previous_roll = last_hand_seen = None
+            previous_mirror = None
+            six_seven_motion = SixSevenMotion()
             while not self.stop_event.is_set():
                 ok, bgr = cap.read()
                 if not ok or bgr is None:
@@ -188,16 +198,50 @@ class CameraWorker(Thread):
                 if options.mirror:
                     bgr = cv2.flip(bgr, 1)
                 rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                timestamp = max(timestamp + 1, int((time.monotonic() - start) * 1000))
+                aspect = rgb.shape[1] / rgb.shape[0]
+                sample_time = time.monotonic()
+                timestamp = max(timestamp + 1, int((sample_time - start) * 1000))
                 result = landmarker.detect_for_video(
                     mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp
                 )
                 hand, gesture, cursor = "No hand", "—", None
                 palm = palm_scale = palm_roll = None
+                pinky_up = False
+                cat = None
+                palms = {}
                 if result.hand_landmarks:
-                    landmarks = result.hand_landmarks[0]
-                    pose = classify_pose(result.hand_world_landmarks[0], pinching)
+                    labels = [categories[0].category_name for categories in result.handedness]
+                    if options.mirror != previous_mirror:
+                        six_seven_motion.reset()
+                    display_labels = [
+                        {"Left": "Right", "Right": "Left"}.get(label, label) if options.mirror else label
+                        for label in labels
+                    ]
+                    index = labels.index(primary) if primary in labels else 0
+                    if (labels[index] != primary or options.mirror != previous_mirror
+                            or last_hand_seen is None or sample_time - last_hand_seen > 0.5):
+                        stable_pose = pending_pose = "Tracking"
+                        pose_frames = 0
+                        pinching = False
+                        previous_roll = None
+                    primary = labels[index]
+                    last_hand_seen = sample_time
+                    previous_mirror = options.mirror
+                    landmarks = result.hand_landmarks[index]
+                    pose = classify_pose(result.hand_world_landmarks[index], pinching,
+                                         image_landmarks=landmarks, aspect=aspect)
+                    for hand_index, world_points in enumerate(result.hand_world_landmarks):
+                        hand_points = result.hand_landmarks[hand_index]
+                        wrist_point, knuckle = hand_points[0], hand_points[9]
+                        palms[display_labels[hand_index]] = (
+                            (wrist_point.x + knuckle.x) / 2, (wrist_point.y + knuckle.y) / 2)
+                        if hand_index != index:
+                            draw_overlay(rgb, hand_points, options, False, None)
+                        hand_pose = pose if hand_index == index else classify_pose(world_points)
+                        if hand_pose.name == "Cat" and (cat is None or hand_index == index):
+                            cat = (knuckle.x, knuckle.y)
                     pinching = pose.pinching
+                    pinky_up = pose.pinky_up
                     pose_frames = pose_frames + 1 if pending_pose == pose.name else 1
                     pending_pose = pose.name
                     if pose_frames >= 3:
@@ -205,15 +249,13 @@ class CameraWorker(Thread):
                     gesture = stable_pose
                     if gesture == "Middle finger" and pose.name != gesture:
                         gesture = pose.name
-                    hand = result.handedness[0][0].category_name
-                    # The Tasks model predicts handedness on unmirrored input.
-                    # Mirroring the input reverses its Left/Right prediction.
-                    if options.mirror:
-                        hand = "Left" if hand == "Right" else "Right"
+                    hand = display_labels[index]
                     cursor = (landmarks[8].x, landmarks[8].y)
+                    if pinching:
+                        cursor = ((cursor[0] + landmarks[4].x) / 2,
+                                  (cursor[1] + landmarks[4].y) / 2)
                     wrist, index, middle, pinky = (landmarks[i] for i in (0, 5, 9, 17))
-                    palm = ((wrist.x + middle.x) / 2, (wrist.y + middle.y) / 2)
-                    aspect = rgb.shape[1] / rgb.shape[0]
+                    palm = palms[hand]
                     palm_dx = (middle.x - wrist.x) * aspect
                     palm_dy = wrist.y - middle.y
                     palm_length = hypot(palm_dx, palm_dy)
@@ -221,19 +263,19 @@ class CameraWorker(Thread):
                         hypot((index.x - pinky.x) * aspect, index.y - pinky.y)
                         + palm_length
                     ) / 2
-                    if palm_length > 0.35 * palm_scale:
-                        palm_roll = atan2(palm_dy, palm_dx)
-                    draw_overlay(rgb, landmarks, options, pose.pinching)
+                    palm_roll = previous_roll = estimate_palm_roll(landmarks, aspect, previous_roll)
+                    draw_overlay(rgb, landmarks, options, pinching, cursor)
                 else:
-                    pinching = False
                     stable_pose = pending_pose = "Tracking"
                     pose_frames = 0
                 now = time.monotonic()
+                six_seven = six_seven_motion.update(palms, sample_time)
                 measured = 1 / max(now - previous, 1e-6)
                 fps = measured if not fps else 0.9 * fps + 0.1 * measured
                 previous = now
-                packet = Frame(rgb, hand, gesture, cursor, fps, pinching, palm, palm_scale,
-                               palm_roll)
+                packet = Frame(rgb, hand, gesture, cursor, fps, cursor is not None and pinching,
+                               palm, palm_scale, palm_roll, pinky_up, cat, six_seven,
+                               len(result.hand_landmarks))
                 # Keep only the newest frame so inference never queues behind Tk.
                 try:
                     self.frames.get_nowait()

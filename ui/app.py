@@ -28,8 +28,9 @@ from PIL import Image, ImageDraw, ImageOps, ImageTk
 from tracking import CameraWorker, Frame, ViewOptions
 from cameras import CameraDevice, discover_cameras
 from dwell import DwellSelector
-from scene_overlay import draw_scene
+from scene_overlay import draw_scene, shape_center
 from shape_interaction import ShapeInteraction
+from gesture_effects import GestureEffects
 
 # Direct script launches put ui/, rather than the repository root, on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -67,6 +68,7 @@ class CameraCanvasApp(ctk.CTk):
         self.scene = Scene()
         self.shape_commands = CommandHandler(self.scene)
         self.interaction = ShapeInteraction()
+        self.effects = GestureEffects()
         self.shape_message = ""
         self.shape_message_until = 0.0
         self.camera_name = tk.StringVar(value="Finding cameras…")
@@ -206,10 +208,10 @@ class CameraCanvasApp(ctk.CTk):
         self.interaction.mode = mode
         self.interaction.reset_motion()
         if mode == "Legacy":
-            help_text = "Pinch to select. Thumb out moves X, point up moves Y, and sweeping an open palm up or down moves Z."
+            help_text = "Pinch to select. Thumb out moves X, point up moves Y. Sweep an open palm to move Z or twist it to rotate."
         else:
             help_text = "Pinch and hold to grab. Move across the frame or toward and away from the camera. Release to drop."
-        self.mode_help.configure(text=help_text)
+        self.mode_help.configure(text=help_text + "\nPinky-up pinch adds or removes shapes. Open palm then fist deletes the selection.")
 
     def _toggle_sidebar(self):
         self.sidebar_visible = not self.sidebar_visible
@@ -336,6 +338,7 @@ class CameraCanvasApp(ctk.CTk):
     def _empty_canvas(self, message):
         self._reset_dwell()
         self.quit_dwell.reset()
+        self.effects.reset()
         self.last_image = None
         self.canvas.itemconfigure(self.image_item, image="")
         self.photo = None
@@ -360,6 +363,7 @@ class CameraCanvasApp(ctk.CTk):
         size = (max(1, self.canvas.winfo_width()), max(1, self.canvas.winfo_height()))
         fitted = ImageOps.contain(self.last_image, size, Image.Resampling.BILINEAR)
         draw_scene(fitted, self.scene.objects, self.interaction.selected)
+        self.effects.draw(fitted, time.monotonic())
         self.photo = ImageTk.PhotoImage(fitted, master=self.canvas)
         self.canvas.itemconfigure(self.image_item, image=self.photo)
         self.canvas.itemconfigure(self.message_item, state="hidden")
@@ -412,7 +416,7 @@ class CameraCanvasApp(ctk.CTk):
     def _select_shape(self, shape):
         """Create the corresponding object in the shared backend scene."""
         # Start at the center, then fill neighboring positions in camera space.
-        row, column = divmod(len(self.scene.objects) % 9, 3)
+        row, column = divmod(self.shape_count % 9, 3)
         offsets = (0.0, -1.1, 1.1)
         position = (offsets[column], offsets[row], 4.0)
         event = GestureEvent(GestureType.CREATE_SHAPE, 1.0, shape_type=ShapeType[shape.upper()])
@@ -470,7 +474,10 @@ class CameraCanvasApp(ctk.CTk):
             self.status.configure(text="●  Live", text_color=ACCENT)
         self.last_image = Image.fromarray(frame.rgb)
         now = time.monotonic()
-        quit_target = frame.hand if frame.cursor is not None and frame.gesture == "Middle finger" else None
+        self.effects.update(frame)
+        effect_pose = "6 7" if frame.six_seven is not None else "Cat" if frame.cat is not None else None
+        quit_target = (frame.hand if not effect_pose and frame.cursor is not None
+                       and frame.gesture == "Middle finger" else None)
         if self.quit_dwell.update(quit_target, now) is not None:
             self.close()
             return
@@ -478,16 +485,21 @@ class CameraCanvasApp(ctk.CTk):
         self.tip_seen = now if frame.cursor is not None else None
         buttons, tip = self._shape_layout()
         toolbar_target = self._shape_at(buttons, tip)
-        self.interaction.update(frame, self.scene.objects, self.last_image.size,
-                                now, over_toolbar=toolbar_target is not None)
-        if self.interaction.pinching or self.interaction.anchor is not None or quit_target is not None:
+        if effect_pose:
+            self.interaction.reset_motion()
+        else:
+            destroyed = self.interaction.update(frame, self.scene.objects, self.last_image.size,
+                                                now, over_toolbar=toolbar_target is not None)
+            for obj in destroyed or ():
+                self.effects.explode(shape_center(obj, self.last_image.size), now)
+        if effect_pose or self.interaction.pinching or self.interaction.anchor is not None or quit_target is not None:
             toolbar_target = None
         selected_shape = self.dwell.update(toolbar_target, now)
         if selected_shape is not None:
             self._select_shape(selected_shape)
         self._render_image()
-        self.hand_value.configure(text=frame.hand)
-        self.pose_value.configure(text=frame.gesture)
+        self.hand_value.configure(text="Left + right" if frame.hand_count == 2 else frame.hand)
+        self.pose_value.configure(text=effect_pose or frame.gesture)
         self.fps_value.configure(text=f"{frame.fps:.0f}")
         position = "—"
         if frame.cursor is not None:
@@ -506,6 +518,7 @@ class CameraCanvasApp(ctk.CTk):
             self.tip = self.tip_seen = None
             self._draw_shape_toolbar()
         worker = self.worker
+        displayed = False
         if worker:
             # Check before draining events so a just-finished worker cannot
             # disappear between the event drain and the cleanup below.
@@ -524,6 +537,7 @@ class CameraCanvasApp(ctk.CTk):
             if not self.error and not worker.stop_event.is_set():
                 try:
                     self._display_frame(worker.frames.get_nowait())
+                    displayed = True
                     if self.closing:
                         return
                 except Empty:
@@ -539,6 +553,8 @@ class CameraCanvasApp(ctk.CTk):
                 elif not self.error:
                     self.status.configure(text="●  Stopped", text_color=MUTED)
                     self._empty_canvas("Camera is off.\nPress Start camera to return to your workspace.")
+        if self.effects.explosions and not displayed:
+            self._render_image()
         self.after(20, self._poll)
 
     def close(self):

@@ -23,6 +23,11 @@ def _project(points, size):
             + (width / 2, height / 2))
 
 
+def shape_center(obj, size):
+    center = _project(obj.transform.position[None, :], size)[0]
+    return center[0] / size[0], center[1] / size[1]
+
+
 def _geometry(obj, size):
     position = obj.transform.position
     if position[2] <= 0:
@@ -69,12 +74,13 @@ def pick_shape(objects, size, cursor):
     return None
 
 
-def draw_scene(image, objects, selected=None):
+def draw_scene(image, objects, selected=()):
     if not objects:
         return
     draw = ImageDraw.Draw(image)
     for obj in _back_to_front(objects):
-        outline = SELECTED if obj is selected else OUTLINE
+        is_selected = obj in selected
+        outline = SELECTED if is_selected else OUTLINE
         geometry = _geometry(obj, image.size)
         if geometry is None:
             continue
@@ -88,7 +94,7 @@ def draw_scene(image, objects, selected=None):
                 color = tuple(min(255, int(c * (0.48 + amount))) for c in obj.color)
                 draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color)
             draw.ellipse((x - radius, y - radius, x + radius, y + radius),
-                         outline=outline, width=3 if obj is selected else 2)
+                         outline=outline, width=3 if is_selected else 2)
             roll = obj.transform.rotation[2]
             mark_x, mark_y = x + 0.6 * radius * cos(roll), y - 0.6 * radius * sin(roll)
             mark = 0.07 * radius
@@ -107,7 +113,7 @@ def draw_scene(image, objects, selected=None):
                     1e-8, np.linalg.norm(normal))
                 color = tuple(int(channel * shade) for channel in obj.color)
                 draw.polygon([pixels[i] for i in face], fill=color, outline=outline,
-                             width=3 if obj is selected else 1)
+                             width=3 if is_selected else 1)
         else:
             for a, b in mesh["edges"]:
                 draw.line((pixels[a], pixels[b]), fill=outline, width=2)

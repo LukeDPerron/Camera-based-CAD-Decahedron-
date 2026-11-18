@@ -118,7 +118,7 @@ class UiTests(unittest.TestCase):
 
         self.assertEqual(self.app.mode_switch.get(), "Updated")
         send((.5, .5), pinching=True)
-        self.assertIs(self.app.interaction.selected, obj)
+        self.assertEqual(self.app.interaction.selected, [obj])
         send((.6, .4), pinching=True, scale=.15)
         x, y, z = obj.transform.position
         self.assertGreater(x, 0)
@@ -131,11 +131,11 @@ class UiTests(unittest.TestCase):
         self.app._set_gesture_mode("Legacy")
         obj.transform.position[:] = (0, 0, 4)
         send((.5, .5), pinching=True)
-        self.assertIsNone(self.app.interaction.selected)
+        self.assertFalse(self.app.interaction.selected)
         now += .25
         send((.5, .5))
         send((.5, .5), pinching=True)
-        self.assertIs(self.app.interaction.selected, obj)
+        self.assertEqual(self.app.interaction.selected, [obj])
         now += .25
         send((.5, .5), "Thumb out")
         send((.6, .4), "Thumb out")
@@ -154,7 +154,7 @@ class UiTests(unittest.TestCase):
         send((.9, .9), "Open palm")
         np.testing.assert_allclose(obj.transform.position, expected)
         send((.9, .9), pinching=True)
-        self.assertIsNone(self.app.interaction.selected)
+        self.assertFalse(self.app.interaction.selected)
 
     def test_updated_grab_survives_dropouts_and_passes_old_depth_limits(self):
         import numpy as np
@@ -175,7 +175,7 @@ class UiTests(unittest.TestCase):
         send((.5, .5), True)
         send((.6, .5), False)
         send((.65, .5), True)
-        self.assertIs(self.app.interaction.selected, obj)
+        self.assertEqual(self.app.interaction.selected, [obj])
         self.assertGreater(obj.transform.position[0], 0)
         send(None, False)
         send(None, False)
@@ -202,10 +202,74 @@ class UiTests(unittest.TestCase):
             with patch("app.time.monotonic", return_value=now):
                 self.app._display_frame(Frame(rgb, "Right", "Pinch", tip, 30,
                                               True, tip, .1, roll))
-        self.assertIs(self.app.interaction.selected, obj)
+        self.assertEqual(self.app.interaction.selected, [obj])
         pivot = 4 * (.52 - .5) * 640 / 360
         np.testing.assert_allclose(obj.transform.position, (pivot, -pivot, 4))
         self.assertAlmostEqual(obj.transform.rotation[2], pi / 2)
+
+    def test_pinky_pinch_group_moves_rotates_and_deletes_together(self):
+        from math import pi
+        import numpy as np
+        from tracking import Frame
+
+        for shape in ("Cube", "Sphere", "Pyramid"):
+            self.app._select_shape(shape)
+        cube, sphere, pyramid = self.app.scene.objects
+        self.app._set_gesture_mode("Legacy")
+        rgb = np.zeros((360, 640, 3), dtype=np.uint8)
+
+        def send(now, tip, pose="Tracking", *, pinch=False, pinky=False, roll=0):
+            with patch("app.time.monotonic", return_value=now):
+                self.app._display_frame(Frame(rgb, "Right", pose, tip, 30, pinch,
+                                              tip, .1, roll, pinky))
+
+        send(0, (.5, .5), pinch=True)
+        send(.3, (.35, .5))
+        send(.4, (.35, .5), pinch=True, pinky=True)
+        self.assertEqual(self.app.interaction.selected, [cube, sphere])
+        send(.7, (.5, .5), "Thumb out")
+        send(.8, (.6, .5), "Thumb out")
+        self.assertGreater(cube.transform.position[0], 0)
+        self.assertGreater(sphere.transform.position[0], -1.1)
+        send(.9, (.6, .5), "Open palm")
+        send(1.0, (.6, .5), "Open palm", roll=pi / 2)
+        np.testing.assert_allclose([cube.transform.rotation[2], sphere.transform.rotation[2]],
+                                   [pi / 2, pi / 2])
+        self.assertGreater(cube.transform.position[1], sphere.transform.position[1])
+        send(1.1, (.6, .5), "Fist")
+        self.assertEqual(self.app.scene.objects, [pyramid])
+        self.assertFalse(self.app.interaction.selected)
+        self.assertEqual(len(self.app.effects.explosions), 2)
+
+    def test_gesture_images_stay_visible_and_explosion_fades(self):
+        import numpy as np
+        from tracking import Frame
+
+        rgb = np.zeros((360, 640, 3), dtype=np.uint8)
+        both = Frame(rgb, "Right", "Cat", (.5, .5), 30, cat=(.5, .5),
+                     six_seven=((.3, .5), (.7, .5)), hand_count=2)
+        no_effect = Frame(rgb, "Right", "Tracking", (.5, .5), 30)
+
+        def show(now, frame):
+            with patch("app.time.monotonic", return_value=now):
+                self.app._display_frame(frame)
+            return self.app.tk.call(str(self.app.photo), "data", "-format", "png")
+
+        clear = show(0, no_effect)
+        first = show(1, both)
+        self.assertEqual(show(2, both), first)
+        self.assertFalse(self.app.effects.explosions)
+        self.assertNotEqual(first, clear)
+        self.assertEqual(show(2.1, no_effect), clear)
+        self.assertFalse(self.app.effects.explosions)
+        self.app.effects.explode((.5, .5), 2.2)
+        full = show(2.2, no_effect)
+        self.assertNotEqual(full, clear)
+        faded = show(3.0, no_effect)
+        self.assertNotEqual(full, faded)
+        self.assertNotEqual(clear, faded)
+        self.assertEqual(show(3.9, no_effect), clear)
+        self.assertFalse(self.app.effects.explosions)
 
     def test_middle_finger_has_to_be_held_to_quit(self):
         import numpy as np
