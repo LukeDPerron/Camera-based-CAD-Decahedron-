@@ -2,6 +2,14 @@
 
 import sys
 import platform
+from pathlib import Path
+
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+UI_ROOT = Path(__file__).resolve().parent
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
+if str(UI_ROOT) not in sys.path:
+    sys.path.insert(0, str(UI_ROOT))
 
 if not (3, 10) <= sys.version_info[:2] <= (3, 14):
     raise SystemExit(
@@ -17,6 +25,10 @@ if (platform.system() == "Darwin" and platform.machine() == "x86_64"
     )
 
 import tkinter as tk
+import subprocess
+import json
+import os
+import tempfile
 from queue import Empty, SimpleQueue
 from threading import Thread
 import time
@@ -56,6 +68,13 @@ class CameraCanvasApp(ctk.CTk):
         self.shape_count = 0
         self.shape_message = ""
         self.shape_message_until = 0.0
+        self._shape_command_path = os.path.join(
+            tempfile.gettempdir(), "decahedron_shape_commands.json"
+        )
+        try:
+            os.remove(self._shape_command_path)
+        except FileNotFoundError:
+            pass
         self.camera_name = tk.StringVar(value="Finding cameras…")
         self.camera_choices: dict[str, CameraDevice] = {}
         self.camera_scan: Thread | None = None
@@ -223,18 +242,12 @@ class CameraCanvasApp(ctk.CTk):
             self.worker.set_options(self._view_options())
 
     def _open_3d_scene(self):
-        if not hasattr(self, "scene"):
-            from src.scene import Scene
-            self.scene = Scene()
-        if hasattr(self, "_scene_thread") and self._scene_thread.is_alive():
+        if hasattr(self, "_scene_process") and self._scene_process.poll() is None:
             return
-
-        def open_window():
-            from src.pyglet_viewer import run
-            run(self.scene)
-
-        self._scene_thread = Thread(target=open_window, daemon=True)
-        self._scene_thread.start()
+        self._scene_process = subprocess.Popen(
+            [sys.executable, "-m", "src.pyglet_viewer"],
+            cwd=str(WORKSPACE_ROOT),
+        )
 
     def refresh_cameras(self, auto_start=False):
         if self.closing or self.camera_scan or self.worker:
@@ -396,8 +409,8 @@ class CameraCanvasApp(ctk.CTk):
 
     def _select_shape(self, shape):
         """Create the corresponding object in the shared backend scene."""
-        from src.gesture_event import ShapeType
         from src.shape_factory import ShapeFactory
+        from src.shape_types import ShapeType
 
         shape_type = {
             "Cube": ShapeType.CUBE,
@@ -410,6 +423,13 @@ class CameraCanvasApp(ctk.CTk):
             from src.scene import Scene
             self.scene = Scene()
         self.scene.add(ShapeFactory.create(shape_type))
+        command = {
+            "shape": shape,
+        }
+        temporary_path = self._shape_command_path + ".tmp"
+        with open(temporary_path, "w", encoding="utf-8") as command_file:
+            json.dump(command, command_file)
+        os.replace(temporary_path, self._shape_command_path)
         self.shape_count += 1
         self.shape_message = f"{shape} selected · action {self.shape_count}"
         self.shape_message_until = time.monotonic() + 2.0
@@ -523,6 +543,8 @@ class CameraCanvasApp(ctk.CTk):
         if self.closing:
             return
         self.closing = True
+        if hasattr(self, "_scene_process") and self._scene_process.poll() is None:
+            self._scene_process.terminate()
         if self.worker:
             self.worker.stop()
         self.camera_button.configure(text="Closing…", state="disabled")

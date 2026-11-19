@@ -1,18 +1,21 @@
 import math
 import threading
+import json
+import os
+import tempfile
 
 import numpy as np
 import pyglet
-from pyglet.gl import GL_TRIANGLES
+from pyglet.gl import GL_BLEND, GL_DEPTH_TEST, GL_LINES, GL_TRIANGLES, glBlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA
 from pyglet.graphics import Batch, ShaderGroup
 from pyglet.graphics.shader import Shader, ShaderProgram
 from pyglet.math import Mat4, Vec3
 from pyglet.window import key, mouse
 
-from .gesture_event import ShapeType
 from .scene import Scene
 from .shape_factory import ShapeFactory
-from .scene_objects import Cube, Cylinder, Pyramid, Sphere
+from .scene_objects import Cube, Pyramid, Sphere
+from .shape_types import ShapeType
 
 
 VERTEX_SHADER = """
@@ -60,11 +63,11 @@ def _sphere_vertices(radius, slices=16, stacks=10):
             d = point(phi0, theta1)
             vertices.extend(a + b + c)
             vertices.extend(a + c + d)
-    return np.asarray(vertices, dtype=np.float32)
+    return np.asarray(vertices, dtype=np.float32).reshape(-1, 3)
 
 
-def _cube_vertices(scale):
-    x, y, z = 0.35 * np.asarray(scale, dtype=float)
+def _cube_vertices():
+    x = y = z = 0.35
     corners = [
         (-x, -y, -z), (x, -y, -z), (x, y, -z), (-x, y, -z),
         (-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z),
@@ -81,48 +84,31 @@ def _cube_vertices(scale):
     for face in faces:
         for index in face:
             vertices.extend(corners[index])
-    return np.asarray(vertices, dtype=np.float32)
+    return np.asarray(vertices, dtype=np.float32).reshape(-1, 3)
 
 
-def _pyramid_vertices(scale):
-    x, y, z = 0.35 * np.asarray(scale, dtype=float)
+def _grid_vertices(size=10.0, spacing=1.0, y=-2.0):
+    vertices = []
+    limit = int(size / spacing)
+    for i in range(-limit, limit + 1):
+        offset = i * spacing
+        vertices.extend((-size, y, offset))
+        vertices.extend((size, y, offset))
+        vertices.extend((-size, y, offset))
+        vertices.extend((offset, y, -size))
+        vertices.extend((offset, y, size))
+    return np.asarray(vertices, dtype=np.float32).reshape(-1, 3)
+
+
+def _pyramid_vertices():
+    x = y = z = 0.35
     points = np.asarray([
         [-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z],
         [0.0, y, 0.0],
     ])
     faces = [(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4), (0, 3, 2), (0, 2, 1)]
     vertices = np.asarray([points[index] for face in faces for index in face], dtype=np.float32)
-    return vertices
-
-
-def _cylinder_vertices(scale, slices=16):
-    scale = np.asarray(scale, dtype=float)
-    radius = 0.22 * float(np.mean(scale[:2]))
-    height = 0.5 * scale[1]
-    vertices = []
-    for lower in (False, True):
-        y = -height if not lower else height
-        for i in range(slices):
-            a = 2.0 * math.pi * i / slices
-            b = 2.0 * math.pi * (i + 1) / slices
-            if lower:
-                vertices.extend((0.0, y, 0.0))
-                vertices.extend((radius * math.cos(a), y, radius * math.sin(a)))
-                vertices.extend((radius * math.cos(b), y, radius * math.sin(b)))
-            else:
-                vertices.extend((0.0, y, 0.0))
-                vertices.extend((radius * math.cos(b), y, radius * math.sin(b)))
-                vertices.extend((radius * math.cos(a), y, radius * math.sin(a)))
-    for i in range(slices):
-        a = 2.0 * math.pi * i / slices
-        b = 2.0 * math.pi * (i + 1) / slices
-        bottom_a = (radius * math.cos(a), -height, radius * math.sin(a))
-        bottom_b = (radius * math.cos(b), -height, radius * math.sin(b))
-        top_a = (radius * math.cos(a), height, radius * math.sin(a))
-        top_b = (radius * math.cos(b), height, radius * math.sin(b))
-        vertices.extend(bottom_a + top_a + bottom_b)
-        vertices.extend(bottom_b + top_a + top_b)
-    return np.asarray(vertices, dtype=np.float32)
+    return vertices.reshape(-1, 3)
 
 
 class PygletSceneWindow(pyglet.window.Window):
@@ -140,6 +126,47 @@ class PygletSceneWindow(pyglet.window.Window):
         self.shader_group = ShaderGroup(self.program)
 
         pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
+        self.help_label = pyglet.text.Label(
+            "Press 1 = Cube  |  2 = Sphere  |  3 = Pyramid",
+            font_name="Arial",
+            font_size=16,
+            x=20,
+            y=20,
+            color=(255, 255, 255, 255),
+            anchor_x="left",
+            anchor_y="bottom",
+            batch=None,
+        )
+        self._shape_command_path = os.path.join(
+            tempfile.gettempdir(), "decahedron_shape_commands.json"
+        )
+        self._shape_command_mtime = None
+        pyglet.clock.schedule_interval(self._poll_shape_commands, 0.05)
+
+    def _poll_shape_commands(self, dt):
+        try:
+            mtime = os.path.getmtime(self._shape_command_path)
+        except FileNotFoundError:
+            return
+        if mtime == self._shape_command_mtime:
+            return
+        self._shape_command_mtime = mtime
+
+        try:
+            with open(self._shape_command_path, "r", encoding="utf-8") as command_file:
+                command = json.load(command_file)
+        except (OSError, json.JSONDecodeError):
+            return
+
+        shape = command.get("shape")
+        shape_type = {
+            "Cube": ShapeType.CUBE,
+            "Sphere": ShapeType.SPHERE,
+            "Pyramid": ShapeType.PYRAMID,
+        }.get(shape)
+        if shape_type is not None:
+            with self.lock:
+                self.scene.add(ShapeFactory.create(shape_type))
     def _camera(self):
         yaw = math.radians(self.camera_yaw)
         pitch = math.radians(self.camera_pitch)
@@ -164,14 +191,11 @@ class PygletSceneWindow(pyglet.window.Window):
 
     def _vertices_for(self, obj):
         if isinstance(obj, Cube):
-            local = _cube_vertices(obj.transform.scale)
+            local = _cube_vertices()
         elif isinstance(obj, Sphere):
-            radius = 0.32 * float(np.max(obj.transform.scale))
-            local = _sphere_vertices(radius)
+            local = _sphere_vertices(0.32)
         elif isinstance(obj, Pyramid):
-            local = _pyramid_vertices(obj.transform.scale)
-        elif isinstance(obj, Cylinder):
-            local = _cylinder_vertices(obj.transform.scale)
+            local = _pyramid_vertices()
         else:
             return np.empty((0, 3), dtype=np.float32)
         return local + obj.transform.position.astype(np.float32)
@@ -180,6 +204,19 @@ class PygletSceneWindow(pyglet.window.Window):
         self.clear()
         projection, view = self._camera()
         batch = Batch()
+        grid = _grid_vertices()
+        grid_colors = np.tile(
+            np.asarray((0.35, 0.45, 0.55), dtype=np.float32),
+            (len(grid), 1),
+        ).reshape(-1)
+        self.program.vertex_list(
+            len(grid),
+            GL_LINES,
+            batch=batch,
+            group=self.shader_group,
+            position=("f", tuple(float(value) for value in grid.reshape(-1))),
+            color=("f", tuple(float(value) for value in grid_colors)),
+        )
         with self.lock:
             objects = list(self.scene.objects)
 
@@ -190,18 +227,26 @@ class PygletSceneWindow(pyglet.window.Window):
             color = tuple(channel / 255.0 for channel in obj.color)
             vertex_count = len(vertices)
             colors = np.tile(np.asarray(color, dtype=np.float32), (vertex_count, 1)).reshape(-1)
-            batch.add(
+            self.program.vertex_list(
                 vertex_count,
                 GL_TRIANGLES,
-                self.shader_group,
-                ("position3f", tuple(float(value) for value in vertices.reshape(-1))),
-                ("color3f", tuple(float(value) for value in colors)),
+                batch=batch,
+                group=self.shader_group,
+                position=("f", tuple(float(value) for value in vertices.reshape(-1))),
+                color=("f", tuple(float(value) for value in colors)),
             )
 
         pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
         self.program["projection"] = projection
         self.program["view"] = view
         batch.draw()
+
+        pyglet.gl.glDisable(GL_DEPTH_TEST)
+        pyglet.gl.glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        self.help_label.draw()
+        pyglet.gl.glDisable(GL_BLEND)
+        pyglet.gl.glEnable(GL_DEPTH_TEST)
 
     def on_key_press(self, symbol, modifiers):
         if symbol == key._1:

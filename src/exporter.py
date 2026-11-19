@@ -4,7 +4,7 @@ import struct
 import numpy as np
 
 from .scene import Scene
-from .scene_objects import Cube, Cylinder, Pyramid, Sphere
+from .scene_objects import Pyramid, Sphere
 
 
 class GLTFExporter:
@@ -84,14 +84,9 @@ class GLTFExporter:
 
 def _mesh_for(obj):
     if isinstance(obj, Sphere):
-        return _uv_sphere(0.32 * float(np.mean(obj.transform.scale)))
-    if isinstance(obj, Cylinder):
-        r = 0.22 * float(np.mean(obj.transform.scale[:2]))
-        h = 0.5 * float(obj.transform.scale[1])
-        return _cylinder(r, h)
+        return _uv_sphere(0.32)
     if isinstance(obj, Pyramid):
-        s = 0.35 * obj.transform.scale
-        x, y, z = s
+        x = y = z = 0.35
         v = np.array(
             [
                 [-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z],
@@ -101,8 +96,7 @@ def _mesh_for(obj):
         )
         t = [(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4), (0, 3, 2), (0, 2, 1)]
         return v, t
-    s = 0.35 * obj.transform.scale
-    return _box(s)
+    return _box(np.full(3, 0.35))
 
 
 def _box(s):
@@ -155,25 +149,4 @@ def _uv_sphere(radius, slices=12, stacks=8):
                 tris.append((a, c, b))
             if i != stacks - 1:
                 tris.append((b, c, d))
-    return np.array(verts, dtype=float), tris
-
-
-def _cylinder(radius, height, slices=12):
-    verts = [[0, -height, 0], [0, height, 0]]
-    for y in (-height, height):
-        for j in range(slices):
-            th = 2 * np.pi * j / slices
-            verts.append([radius * np.cos(th), y, radius * np.sin(th)])
-    tris = []
-    bottom_start = 2
-    top_start = 2 + slices
-    for j in range(slices):
-        b0 = bottom_start + j
-        b1 = bottom_start + (j + 1) % slices
-        t0 = top_start + j
-        t1 = top_start + (j + 1) % slices
-        tris.append((b0, t0, b1))
-        tris.append((b1, t0, t1))
-        tris.append((0, b1, b0))
-        tris.append((1, t0, t1))
     return np.array(verts, dtype=float), tris

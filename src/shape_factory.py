@@ -1,14 +1,13 @@
 import numpy as np
 
-from .scene_objects import Cube, Cylinder, Pyramid, SceneObject, Sphere, Transform
-from .gesture_event import ShapeType
+from .scene_objects import Cube, Pyramid, SceneObject, Sphere, Transform
+from .shape_types import ShapeType
 
 
 class ShapeFactory:
     _counts = {
         ShapeType.CUBE: 0,
         ShapeType.SPHERE: 0,
-        ShapeType.CYLINDER: 0,
         ShapeType.PYRAMID: 0,
     }
 
@@ -30,8 +29,6 @@ class ShapeFactory:
             return Cube(f"Cube #{n}", transform)
         if shape_type is ShapeType.SPHERE:
             return Sphere(f"Sphere #{n}", transform)
-        if shape_type is ShapeType.CYLINDER:
-            return Cylinder(f"Cylinder #{n}", transform)
         if shape_type is ShapeType.PYRAMID:
             return Pyramid(f"Pyramid #{n}", transform)
         raise AssertionError(f"Unhandled shape: {shape_type}")

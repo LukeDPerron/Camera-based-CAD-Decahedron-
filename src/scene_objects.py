@@ -3,14 +3,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .gesture_event import ShapeType
+from .shape_types import ShapeType
 
 
 @dataclass
 class Transform:
     position: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 4.0], dtype=float))
-    rotation: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
-    scale: np.ndarray = field(default_factory=lambda: np.ones(3, dtype=float))
 
 
 class SceneObject(ABC):
@@ -30,7 +28,7 @@ class Cube(SceneObject):
         super().__init__(name, ShapeType.CUBE, transform)
 
     def get_mesh(self) -> dict:
-        s = 0.35 * self.transform.scale
+        s = np.full(3, 0.35)
         corners = np.array(
             [[x, y, z] for x in (-s[0], s[0]) for y in (-s[1], s[1]) for z in (-s[2], s[2])],
             dtype=float,
@@ -48,34 +46,7 @@ class Sphere(SceneObject):
         super().__init__(name, ShapeType.SPHERE, transform)
 
     def get_mesh(self) -> dict:
-        radius = 0.32 * float(np.mean(self.transform.scale))
-        return {"kind": "sphere", "radius": radius}
-
-
-class Cylinder(SceneObject):
-    def __init__(self, name: str, transform: Transform | None = None):
-        super().__init__(name, ShapeType.CYLINDER, transform)
-
-    def get_mesh(self) -> dict:
-        r = 0.22 * float(np.mean(self.transform.scale[:2]))
-        h = 0.5 * float(self.transform.scale[1])
-        rings = []
-        for y in (-h, h):
-            ring = []
-            for i in range(12):
-                a = 2 * np.pi * i / 12
-                ring.append([r * np.cos(a), y, r * np.sin(a)])
-            rings.append(np.array(ring, dtype=float))
-        points = np.vstack(rings)
-        edges = []
-        for ring_i in range(2):
-            for i in range(12):
-                a = ring_i * 12 + i
-                b = ring_i * 12 + (i + 1) % 12
-                edges.append((a, b))
-        for i in range(12):
-            edges.append((i, i + 12))
-        return {"kind": "wire", "local_points": points, "edges": edges}
+        return {"kind": "sphere", "radius": 0.32}
 
 
 class Pyramid(SceneObject):
@@ -83,10 +54,7 @@ class Pyramid(SceneObject):
         super().__init__(name, ShapeType.PYRAMID, transform)
 
     def get_mesh(self) -> dict:
-        s = self.transform.scale
-        x = 0.35 * s[0]
-        y = 0.35 * s[1]
-        z = 0.35 * s[2]
+        x = y = z = 0.35
         points = np.array(
             [
                 [-x, -y, -z],
