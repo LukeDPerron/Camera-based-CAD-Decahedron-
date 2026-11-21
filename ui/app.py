@@ -38,6 +38,9 @@ from src.command_handler import CommandHandler
 from src.gesture_event import GestureEvent, GestureType, ShapeType
 from src.scene import Scene
 
+from color_panel import ColorPanel, panel_frame_rect
+from colors.shape_color import set_shape_color
+
 
 BG = "#10151C"
 PANEL = "#18212B"
@@ -71,6 +74,7 @@ class CameraCanvasApp(ctk.CTk):
         self.effects = GestureEffects()
         self.shape_message = ""
         self.shape_message_until = 0.0
+        self.color_panel = ColorPanel()
         self.camera_name = tk.StringVar(value="Finding cameras…")
         self.camera_choices: dict[str, CameraDevice] = {}
         self.camera_scan: Thread | None = None
@@ -123,6 +127,7 @@ class CameraCanvasApp(ctk.CTk):
         self.viewport = viewport
         self.canvas = tk.Canvas(viewport, bg=CANVAS, highlightthickness=0, bd=0)
         self.canvas.bind("<Button-1>", self._click_shape)
+        self.canvas.bind("<Button-1>", self._click_color_panel, add="+")
         self.canvas.pack(fill="both", expand=True, padx=12, pady=12)
         self.image_item = self.canvas.create_image(0, 0, anchor="center")
         self.message_item = self.canvas.create_text(
@@ -435,6 +440,28 @@ class CameraCanvasApp(ctk.CTk):
             self._select_shape(target)
             self._render_image()
 
+    def _click_color_panel(self, event):
+        """Mouse fallback for the hand-tracking pinch, same pattern as _click_shape."""
+        if self.last_image is None:
+            return
+        rect = panel_frame_rect(self.last_image.size,
+                                (self.canvas.winfo_width(), self.canvas.winfo_height()))
+        self.color_panel.pick_now((event.x, event.y), rect)
+        self._draw_color_panel()
+
+    def _draw_color_panel(self):
+        if self.last_image is None:
+            self.canvas.delete("color_panel")
+            return
+        rect = panel_frame_rect(self.last_image.size,
+                                (self.canvas.winfo_width(), self.canvas.winfo_height()))
+        color_point = None
+        if self.tip is not None:
+            left, top, fw, fh = rect
+            color_point = (left + self.tip[0] * fw, top + self.tip[1] * fh)
+        hover = self.color_panel.hover_target(color_point, rect)
+        self.color_panel.draw(self.canvas, rect, hover)
+
     def _select_shape(self, shape):
         """Create the corresponding object in the shared backend scene."""
         # Start at the center, then fill neighboring positions in camera space.
@@ -443,6 +470,8 @@ class CameraCanvasApp(ctk.CTk):
         position = (offsets[column], offsets[row], 4.0)
         event = GestureEvent(GestureType.CREATE_SHAPE, 1.0, shape_type=ShapeType[shape.upper()])
         self.shape_commands.handle(event, spawn_position=position)
+        if self.scene.objects:
+            set_shape_color(self.scene.objects[-1], self.color_panel.selected_rgb)
         self.shape_count += 1
         self.shape_message = f"{shape} selected · action {self.shape_count}"
         self.shape_message_until = time.monotonic() + 2.0
@@ -528,6 +557,15 @@ class CameraCanvasApp(ctk.CTk):
         if frame.cursor is not None:
             position = f"{frame.cursor[0]:.2f} / {frame.cursor[1]:.2f}"
         self.position_value.configure(text=position)
+        aim = frame.index_tip or frame.cursor
+        color_rect = panel_frame_rect(self.last_image.size,
+                                      (self.canvas.winfo_width(), self.canvas.winfo_height()))
+        color_point = None
+        if aim is not None:
+            left, top, fw, fh = color_rect
+            color_point = (left + aim[0] * fw, top + aim[1] * fh)
+        self.color_panel.update(color_point, now, color_rect)
+        self._draw_color_panel()
 
     def _poll(self):
         if self.closing:
@@ -579,6 +617,8 @@ class CameraCanvasApp(ctk.CTk):
         if self.effects.explosions and not displayed:
             self._render_image()
         self.after(20, self._poll)
+        if self.last_image is None:
+            self.canvas.delete("color_panel")
 
     def close(self):
         if self.closing:
